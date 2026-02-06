@@ -656,21 +656,65 @@ def assess_stage(stage: int) -> tuple:
     return (task_state and task_state.get("completed", False)), steps_limit
 
 
-def assess(max_stage: int = 10, trials: int = 5):
+def assess(max_stage: int = 10, trials: int = 5, run_name: str = None):
     log("=" * 50)
     log(f"ASSESSMENT - {trials} trials per stage")
     log("=" * 50)
 
+    run = init_wandb(
+        run_name=run_name or f"assess_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        config={"trials": trials, "max_stage": max_stage, "model": "Qwen/Qwen3-VL-8B-Instruct"},
+    )
+
+    results = {}
+    total_pass, total_trials = 0, 0
+
     for stage in range(1, max_stage + 1):
         successes = 0
+        stage_steps = []
         for trial in range(trials):
             completed, steps = assess_stage(stage)
             if completed:
                 successes += 1
+            stage_steps.append(steps)
             log(f"  Stage {stage} trial {trial+1}: {'PASS' if completed else 'FAIL'} ({steps} steps)")
 
+            if run:
+                run.log({
+                    f"trial/stage{stage}_pass": int(completed),
+                    f"trial/stage{stage}_steps": steps,
+                })
+
         rate = successes / trials * 100
+        avg_steps = sum(stage_steps) / len(stage_steps)
+        results[stage] = {"pass_rate": rate, "successes": successes, "avg_steps": avg_steps}
+        total_pass += successes
+        total_trials += trials
         log(f"Stage {stage}: {successes}/{trials} ({rate:.0f}%)", "ASSESS")
+
+        if run:
+            run.log({
+                f"stage/stage{stage}_pass_rate": rate,
+                f"stage/stage{stage}_avg_steps": avg_steps,
+            })
+
+    overall = total_pass / total_trials * 100 if total_trials else 0
+    log(f"\nOverall: {total_pass}/{total_trials} ({overall:.0f}%)", "ASSESS")
+
+    if run:
+        run.log({"assess/overall_pass_rate": overall, "assess/total_pass": total_pass})
+        # Summary table
+        try:
+            import wandb
+            table = wandb.Table(columns=["stage", "pass_rate", "successes", "trials", "avg_steps"])
+            for stage, r in sorted(results.items()):
+                table.add_data(stage, r["pass_rate"], r["successes"], trials, r["avg_steps"])
+            run.log({"assess/summary": table})
+        except Exception:
+            pass
+        run.finish()
+
+    return results
 
 
 # --- Main ---

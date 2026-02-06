@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg};
 
 const DROPDOWN_GROUPS: &[(&str, &[&str])] = &[
     ("Color", &["Red", "Blue", "Green", "Yellow", "Purple", "Orange", "Pink"]),
@@ -41,8 +41,7 @@ fn random_level4() -> Level4State {
     let card_w = 300.0;
     let card_h = 130.0;
     let pad = 80.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - card_w - pad).max(pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - card_h - pad).max(pad));
+    let (x, y) = super::safe_position(&mut rng, card_w, card_h, pad);
 
     Level4State { label: label.to_string(), options, target, x, y }
 }
@@ -61,17 +60,20 @@ pub fn Level4() -> Element {
     let card_y = st.y;
     drop(st);
 
-    let position_desc = describe_position(card_x, card_y, 300.0, 130.0);
-    let options_desc = options.iter()
-        .map(|o| if *o == target { format!("\"{}\" (target)", o) } else { format!("\"{}\"", o) })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let description = format!(
-        "dropdown ({}), {} options: {}, target: \"{}\", at {}",
-        label, options.len(), options_desc, target, position_desc
+    // Build UINode tree for ground truth
+    let tree = ui_node::card(
+        Rect::new(card_x, card_y, 300.0, 130.0),
+        vec![
+            ui_node::dropdown(
+                &label,
+                Rect::new(card_x + 20.0, card_y + 60.0, 260.0, 36.0),
+                options.clone(),
+                &target,
+            ),
+        ],
     );
-
-    let steps = format!(r#"[{{"action":"click","target":"Choose..."}},{{"action":"click","target":"{}"}}]"#, target);
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), false);
 
     let card_style = format!(
         "position: absolute; left: {}px; top: {}px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); width: 260px; font-family: system-ui, sans-serif;",
@@ -105,7 +107,7 @@ pub fn Level4() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -148,7 +150,7 @@ pub fn Level4() -> Element {
                 target_y: card_y,
                 target_w: 300.0,
                 target_h: 130.0,
-                steps: steps,
+                tree: Some(tree.clone()),
             }
         }
     }

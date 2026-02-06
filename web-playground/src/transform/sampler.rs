@@ -36,9 +36,10 @@ impl Sampler {
 
     /// Sample a random position that keeps the element on-canvas
     pub fn random_position<R: Rng>(rng: &mut R, elem_w: f32, elem_h: f32) -> Position {
+        let (vp_w, vp_h) = crate::primitives::viewport_size();
         let margin = 40.0;
-        let max_x = (Position::VIEWPORT - elem_w - margin).max(margin);
-        let max_y = (Position::VIEWPORT - elem_h - margin).max(margin);
+        let max_x = (vp_w - elem_w - margin).max(margin);
+        let max_y = (vp_h - elem_h - margin).max(margin);
         let x = rng.random_range(margin..=max_x);
         let y = rng.random_range(margin..=max_y);
         Position::new(x, y)

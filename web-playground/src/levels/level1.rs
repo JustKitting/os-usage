@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 
 use crate::Route;
 use crate::pool::{ElementPool, ElementKind};
+use crate::ui_node::{self, Rect};
 use super::{random_element, random_canvas_bg};
 
 #[component]
@@ -18,7 +19,10 @@ pub fn Level1() -> Element {
     let description = current.describe();
     let (bx, by, bw, bh) = current.bounds();
     let target_text = super::ground_truth::strip_tags(&html).trim().to_string();
-    let steps = format!(r#"[{{"action":"click","target":"{}"}}]"#, target_text);
+    let viewport_style = super::viewport_style(&bg(), false);
+
+    // Build UINode tree for ground truth
+    let tree = ui_node::target_button(&target_text, Rect::new(bx, by, bw, bh));
     drop(current);
 
     let pool_click = pool.clone();
@@ -50,7 +54,7 @@ pub fn Level1() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     class: "target",
@@ -73,7 +77,7 @@ pub fn Level1() -> Element {
                 target_y: by,
                 target_w: bw,
                 target_h: bh,
-                steps: steps,
+                tree: Some(tree.clone()),
             }
         }
     }

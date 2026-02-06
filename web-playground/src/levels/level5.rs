@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg};
 
 const BUTTON_LABELS: &[&str] = &[
     "Submit", "Cancel", "Confirm", "Delete", "Save", "Edit", "Next",
@@ -52,8 +52,8 @@ fn random_level5() -> Level5State {
     let card_w = 320.0;
     let card_h = 70.0 + (btn_count as f32 * 48.0);
     let pad = 80.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - card_w - pad).max(pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - card_h - pad).max(pad));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, pad, vp_w * 1.3, vp_h * 1.3);
 
     Level5State { target, labels, colors, x, y }
 }
@@ -75,15 +75,20 @@ pub fn Level5() -> Element {
 
     let pressed = wrong_idx();
     let card_h = 70.0 + (labels.len() as f32 * 48.0);
-    let position_desc = describe_position(card_x, card_y, 320.0, card_h);
-    let buttons_desc = labels.iter().enumerate()
-        .map(|(i, l)| if *l == target { format!("\"{}\" (target)", l) } else { format!("\"{}\"", l) })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let description = format!(
-        "button card with {} buttons: {}, target: \"{}\", at {}",
-        labels.len(), buttons_desc, target, position_desc
-    );
+
+    // Build UINode tree for ground truth
+    let card_rect = Rect::new(card_x, card_y, 320.0, card_h);
+    let children: Vec<_> = labels.iter().map(|l| {
+        let btn_rect = Rect::new(card_x, card_y, 320.0, card_h);
+        if *l == target {
+            ui_node::target_button(l.as_str(), btn_rect)
+        } else {
+            ui_node::button(l.as_str(), btn_rect)
+        }
+    }).collect();
+    let tree = ui_node::card(card_rect, children);
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     let card_style = format!(
         "position: absolute; left: {}px; top: {}px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); width: 280px; font-family: system-ui, sans-serif;",
@@ -117,7 +122,7 @@ pub fn Level5() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -174,7 +179,7 @@ pub fn Level5() -> Element {
                 target_y: card_y,
                 target_w: 320.0,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"click","target":"{}"}}]"#, target),
+                tree: Some(tree.clone()),
             }
         }
     }

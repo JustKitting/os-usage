@@ -16,5 +16,5 @@ pub mod scale;
 pub use angle::Angle;
 pub use animation::Animation;
 pub use opacity::Opacity;
-pub use position::Position;
+pub use position::{Position, viewport_size};
 pub use scale::Scale;

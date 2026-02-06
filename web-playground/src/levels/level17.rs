@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const GROUP_NAMES: &[&str] = &[
     "Size", "Color", "Plan", "Priority", "Shipping",
@@ -96,8 +96,7 @@ fn random_level17() -> Level17State {
     let card_h = group_count as f32 * group_h + total_opts as f32 * opt_h + 100.0;
 
     let margin = 50.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (x, y) = super::safe_position(&mut rng, card_w, card_h, margin);
 
     Level17State { groups, target_group, target_option, mode, x, y, card_w }
 }
@@ -126,6 +125,7 @@ pub fn Level17() -> Element {
 
     let group_count = groups.len();
     let is_wrong = wrong();
+    let viewport_style = super::viewport_style(&bg(), false);
     let sels: Vec<Option<usize>> = selections.read().clone();
 
     let target_group_name = groups[target_group].name.clone();
@@ -159,23 +159,25 @@ pub fn Level17() -> Element {
     );
     let submit_bg = if is_wrong { "#ef4444" } else { "#4f46e5" };
 
-    // Ground truth
-    let groups_desc: String = groups.iter().enumerate().map(|(gi, g)| {
-        let opts: String = g.options.iter().enumerate().map(|(oi, o)| {
-            let marker = if gi == target_group && oi == target_option { " (TARGET)" } else { "" };
-            let sel = if sels.get(gi) == Some(&Some(oi)) { " [selected]" } else { "" };
-            format!("\"{}\"{}{}", o, marker, sel)
-        }).collect::<Vec<_>>().join(", ");
-        format!("\"{}\" [{}]", g.name, opts)
-    }).collect::<Vec<_>>().join("; ");
-    let position_desc = describe_position(card_x, card_y, card_w, card_h);
-    let description = format!(
-        "radio buttons, {} groups: {}, mode: {}, at {}",
-        group_count, groups_desc,
-        match mode { 1 => "ordinal group", 2 => "ordinal option", _ => "by name" },
-        position_desc
+    // Ground truth via UINode tree
+    let radio_nodes: Vec<_> = groups.iter().enumerate().map(|(gi, g)| {
+        let target_opt_idx = if gi == target_group { target_option } else { 0 };
+        let mut node = ui_node::radio_group(
+            &g.name,
+            Rect::new(card_x + 16.0, card_y + 40.0 + gi as f32 * (group_h + g.options.len() as f32 * opt_h), card_w - 32.0, group_h + g.options.len() as f32 * opt_h),
+            g.options.clone(),
+            target_opt_idx,
+        );
+        if gi != target_group {
+            node.visual_mut().is_target = false;
+        }
+        node
+    }).collect();
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, card_w, card_h),
+        "Submit",
+        radio_nodes,
     );
-
     rsx! {
         div {
             style: "min-height: 100vh; background: #0f0f1a; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: system-ui, sans-serif;",
@@ -204,7 +206,7 @@ pub fn Level17() -> Element {
             // Canvas
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -306,12 +308,12 @@ pub fn Level17() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: card_x,
                 target_y: card_y,
                 target_w: card_w,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"click","target":"{}"}},{{"action":"click","target":"Submit"}}]"#, target_option_name),
+                tree: Some(tree.clone()),
             }
         }
     }

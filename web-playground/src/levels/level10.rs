@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, Rect, UINode, Visual, InputState, DropdownState, ToggleState};
+use super::{fresh_rng, random_canvas_bg};
 
 const INPUT_LABELS: &[&str] = &[
     "Username", "Email", "Password", "First name", "Last name",
@@ -109,8 +109,8 @@ fn random_level10() -> Level10State {
     let card_w = 340.0;
     let card_h = 140.0 + (input_count as f32 * 68.0);
     let pad = 80.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - card_w - pad).max(pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - card_h - pad).max(pad));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, pad, vp_w * 1.3, vp_h * 1.3);
 
     Level10State { inputs, tasks, x, y }
 }
@@ -139,6 +139,7 @@ pub fn Level10() -> Element {
 
     let input_count = inputs_data.len();
     let btn_flash = wrong_btn();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     // Task display list for the instruction
     let tasks_display: Vec<(u8, String, String, String)> = tasks_data.iter()
@@ -157,51 +158,50 @@ pub fn Level10() -> Element {
 
     // Ground truth
     let card_h = 140.0 + (input_count as f32 * 68.0);
-    let position_desc = describe_position(card_x, card_y, 340.0, card_h);
 
-    let inputs_desc = inputs_data.iter().enumerate()
-        .map(|(i, (label, kind, opts))| {
-            let kind_str = match kind {
-                0 => "text".to_string(),
-                1 => format!("dropdown: {}", opts.iter().map(|o| format!("\"{}\"", o)).collect::<Vec<_>>().join(", ")),
-                _ => "toggle".to_string(),
-            };
-            if let Some(task) = tasks_data.iter().find(|(idx, _, _)| *idx == i) {
-                let action = match kind {
-                    0 => format!(", task: type \"{}\"", task.1),
-                    1 => format!(", task: select \"{}\"", task.2),
-                    _ => ", task: toggle on".to_string(),
-                };
-                format!("\"{}\" ({}{})", label, kind_str, action)
-            } else {
-                format!("\"{}\" ({})", label, kind_str)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let description = format!(
-        "form card, {} inputs: {}, submit + cancel buttons, {} tasks, at {}",
-        input_count, inputs_desc, tasks_data.len(), position_desc
-    );
-
-    let steps = {
-        let mut parts: Vec<String> = Vec::new();
-        for (idx, word, sel) in tasks_data.iter() {
-            let (label, kind, _) = &inputs_data[*idx];
-            match kind {
-                0 => parts.push(format!(r#"{{"action":"type","target":"{}","value":"{}"}}"#, label, word)),
-                1 => {
-                    parts.push(r#"{"action":"click","target":"Choose..."}"#.to_string());
-                    parts.push(format!(r#"{{"action":"click","target":"{}"}}"#, sel));
+    // Build UINode tree for ground truth
+    let input_nodes: Vec<UINode> = inputs_data.iter().enumerate().map(|(i, (label, kind, opts))| {
+        let has_task = tasks_data.iter().find(|(idx, _, _)| *idx == i);
+        let row_y = card_y + 100.0 + i as f32 * 68.0;
+        let rect = Rect::new(card_x + 20.0, row_y, 260.0, 36.0);
+        match kind {
+            0 => {
+                if let Some((_, word, _)) = has_task {
+                    ui_node::text_input(label.as_str(), rect, "Type here...", word.as_str())
+                } else {
+                    UINode::TextInput(
+                        Visual::new(label.as_str(), rect),
+                        InputState { placeholder: "Type here...".into(), current_value: String::new(), target_value: String::new() },
+                    )
                 }
-                _ => parts.push(format!(r#"{{"action":"click","target":"{}"}}"#, label)),
+            }
+            1 => {
+                if let Some((_, _, sel)) = has_task {
+                    ui_node::dropdown(label.as_str(), rect, opts.clone(), sel.as_str())
+                } else {
+                    UINode::Dropdown(
+                        Visual::new(label.as_str(), rect),
+                        DropdownState { options: opts.clone(), selected: None, target_option: String::new(), trigger_label: "Choose...".into() },
+                    )
+                }
+            }
+            _ => {
+                if has_task.is_some() {
+                    ui_node::toggle(label.as_str(), rect, false)
+                } else {
+                    UINode::Toggle(
+                        Visual::new(label.as_str(), rect),
+                        ToggleState { is_on: false },
+                    )
+                }
             }
         }
-        parts.push(r#"{"action":"click","target":"Submit"}"#.to_string());
-        format!("[{}]", parts.join(","))
-    };
-
+    }).collect();
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, 340.0, card_h),
+        "Submit",
+        input_nodes,
+    );
     let card_style = format!(
         "position: absolute; left: {}px; top: {}px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); width: 300px; font-family: system-ui, sans-serif;",
         card_x, card_y
@@ -237,7 +237,7 @@ pub fn Level10() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -303,7 +303,7 @@ pub fn Level10() -> Element {
                                 let kind_val = *kind;
                                 let opts_clone = opts.clone();
                                 let input_val = inputs_text.read().get(i).cloned().unwrap_or_default();
-                                let sel_val = selections.read().get(i).cloned().unwrap_or_default();
+                                let _sel_val = selections.read().get(i).cloned().unwrap_or_default();
 
                                 let has_task = tasks_data.iter().any(|(idx, _, _)| *idx == i);
                                 let is_on = toggled.read().get(i).copied().unwrap_or(false);
@@ -443,12 +443,12 @@ pub fn Level10() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: card_x,
                 target_y: card_y,
                 target_w: 340.0,
                 target_h: card_h,
-                steps: steps,
+                tree: Some(tree.clone()),
             }
         }
     }

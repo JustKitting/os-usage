@@ -3,7 +3,7 @@
 use crate::pool::DesignSnippet;
 use crate::primitives::{Angle, Animation, Opacity, Position, Scale};
 
-/// A snippet placed on the 1024x1024 canvas with transforms
+/// A snippet placed on the canvas with transforms
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedElement {
     pub snippet: DesignSnippet,
@@ -157,13 +157,13 @@ mod tests {
 
     #[test]
     fn animation_style_none() {
-        let placed = PlacedElement::new(test_snippet(), Position::CENTER);
+        let placed = PlacedElement::new(test_snippet(), Position::center());
         assert_eq!(placed.animation_style(), "");
     }
 
     #[test]
     fn animation_style_pulse() {
-        let placed = PlacedElement::new(test_snippet(), Position::CENTER)
+        let placed = PlacedElement::new(test_snippet(), Position::center())
             .with_animation(Animation::Pulse { speed: AnimationSpeed::Normal });
         let style = placed.animation_style();
         assert!(style.contains("animation: pulse 2s"));
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn describe_includes_animation() {
-        let placed = PlacedElement::new(test_snippet(), Position::CENTER)
+        let placed = PlacedElement::new(test_snippet(), Position::center())
             .with_animation(Animation::Bounce { speed: AnimationSpeed::Fast, height: 20.0 });
         let desc = placed.describe();
         assert!(desc.contains("bouncing quickly"));
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn describe_no_animation_when_none() {
-        let placed = PlacedElement::new(test_snippet(), Position::CENTER);
+        let placed = PlacedElement::new(test_snippet(), Position::center());
         let desc = placed.describe();
         assert!(!desc.contains("pulsing"));
         assert!(!desc.contains("bouncing"));

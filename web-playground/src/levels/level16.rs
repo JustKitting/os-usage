@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, Rect, Visual, UINode, SliderState};
+use super::{fresh_rng, random_canvas_bg};
 
 const SLIDER_LABELS: &[&str] = &[
     "Volume", "Brightness", "Contrast", "Opacity", "Speed",
@@ -88,8 +88,7 @@ fn random_level16() -> Level16State {
     let slider_h = 72.0;
     let card_h = count as f32 * slider_h + 120.0;
     let margin = 50.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (x, y) = super::safe_position(&mut rng, card_w, card_h, margin);
 
     Level16State { sliders, target_slider, mode, x, y, card_w }
 }
@@ -124,6 +123,7 @@ pub fn Level16() -> Element {
 
     let slider_count = sliders.len();
     let is_wrong = wrong();
+    let viewport_style = super::viewport_style(&bg(), false);
     let cur_vals: Vec<i32> = values.read().clone();
     let cur_drag = drag_idx();
 
@@ -149,19 +149,40 @@ pub fn Level16() -> Element {
     let thumb_w: f32 = 18.0;
     let usable_w = track_w - thumb_w;
 
-    // Ground truth
-    let sliders_desc: String = sliders.iter().enumerate().map(|(i, s)| {
-        let marker = if i == target_slider { " (TARGET)" } else { "" };
-        format!("\"{}\" range {}-{} step {} target={} current={}{}", s.label, s.min, s.max, s.step, s.target_val, cur_vals.get(i).copied().unwrap_or(s.current_val), marker)
-    }).collect::<Vec<_>>().join(", ");
-    let position_desc = describe_position(card_x, card_y, card_w, card_h);
-    let description = format!(
-        "slider, {} sliders: [{}], mode: {}, at {}",
-        slider_count, sliders_desc,
-        match mode { 1 => "ordinal", _ => "by label" },
-        position_desc
-    );
+    // Build UINode tree for ground truth
+    let slider_nodes: Vec<UINode> = sliders.iter().enumerate().map(|(i, s)| {
+        let is_target = i == target_slider;
+        let val = cur_vals.get(i).copied().unwrap_or(s.current_val);
+        let ratio = if s.max > s.min { (val - s.min) as f32 / (s.max - s.min) as f32 } else { 0.0 };
+        let thumb_left = ratio * usable_w;
+        let target_ratio = if s.max > s.min { (s.target_val - s.min) as f32 / (s.max - s.min) as f32 } else { 0.0 };
+        let target_thumb_left = target_ratio * usable_w;
+        let row_y = 60.0 + i as f32 * slider_h;
 
+        let mut node = UINode::Slider(
+            Visual::new(&s.label, Rect::new(card_x + 16.0, card_y + row_y, track_w, 28.0))
+                .color(&s.track_color),
+            SliderState {
+                min: s.min,
+                max: s.max,
+                step: s.step,
+                current_val: val,
+                target_val: s.target_val,
+                thumb_rect: Rect::new(card_x + 16.0 + thumb_left, card_y + row_y + 4.0, thumb_w, 20.0),
+                target_thumb_rect: Rect::new(card_x + 16.0 + target_thumb_left, card_y + row_y + 4.0, thumb_w, 20.0),
+            },
+        );
+        if is_target {
+            node.visual_mut().is_target = true;
+        }
+        node
+    }).collect();
+
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, card_w, card_h),
+        "Submit",
+        slider_nodes,
+    );
     rsx! {
         div {
             style: "min-height: 100vh; background: #0f0f1a; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: system-ui, sans-serif;",
@@ -190,7 +211,7 @@ pub fn Level16() -> Element {
             // Canvas
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -375,12 +396,12 @@ pub fn Level16() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: card_x,
                 target_y: card_y,
                 target_w: card_w,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"drag","from":"drag-from: {}","to":"drag-to: {}"}},{{"action":"click","target":"Submit"}}]"#, target_label, target_label),
+                tree: Some(tree.clone()),
             }
         }
     }

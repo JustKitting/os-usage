@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const SLIDE_COLORS: &[&str] = &[
     "#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6",
@@ -49,8 +49,8 @@ fn random_level11() -> Level11State {
     let card_w = 340.0;
     let card_h = 400.0;
     let pad = 80.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - card_w - pad).max(pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - card_h - pad).max(pad));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, pad, vp_w * 1.3, vp_h * 1.3);
 
     Level11State { slides, target_slide, nav_type, x, y }
 }
@@ -101,11 +101,12 @@ pub fn Level11() -> Element {
     let cur_text = slides[cur.min(slide_count - 1)].1.clone();
     let input_val = input_text.read().clone();
     let is_wrong = wrong();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     let left_opacity = if cur == 0 { "0.3" } else { "0.8" };
     let right_opacity = if cur >= slide_count - 1 { "0.3" } else { "0.8" };
 
-    let nav_desc = match nav_type {
+    let _nav_desc = match nav_type {
         0 => "arrows",
         1 => "dots",
         2 => "arrows+dots",
@@ -114,24 +115,20 @@ pub fn Level11() -> Element {
         _ => "auto-slide",
     };
 
-    // Ground truth
-    let position_desc = describe_position(card_x, card_y, 340.0, 400.0);
-    let slides_desc = slides.iter().enumerate()
-        .map(|(i, (color, text))| {
-            if i == target_slide {
-                format!("\"{}\" {} (target)", text, color)
-            } else {
-                format!("\"{}\" {}", text, color)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let description = format!(
-        "carousel card, {} slides: {}, nav: {}, target: slide {} (\"{}\"), enter \"{}\" and submit, at {}",
-        slide_count, slides_desc, nav_desc, target_slide + 1, target_text, target_text, position_desc
+    // Build UINode tree for ground truth
+    // The carousel has a text input and submit button as a form
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, 340.0, 400.0),
+        "Submit",
+        vec![
+            ui_node::text_input(
+                "Enter slide text",
+                Rect::new(card_x + 20.0, card_y + 300.0, 260.0, 36.0),
+                "Enter slide text...",
+                &target_text,
+            ),
+        ],
     );
-
     let card_style = format!(
         "position: absolute; left: {}px; top: {}px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); width: 300px; font-family: system-ui, sans-serif;",
         card_x, card_y
@@ -167,7 +164,7 @@ pub fn Level11() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -356,12 +353,12 @@ pub fn Level11() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: card_x,
                 target_y: card_y,
                 target_w: 340.0,
                 target_h: 400.0,
-                steps: format!(r#"[{{"action":"type","target":"Enter slide text...","value":"{}"}},{{"action":"click","target":"Submit"}}]"#, target_text),
+                tree: Some(tree.clone()),
             }
         }
     }

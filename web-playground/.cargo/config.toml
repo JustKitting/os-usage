@@ -1,0 +1,2 @@
+[target.wasm32-unknown-unknown]
+rustflags = ["-Clink-args=--max-memory=268435456"]

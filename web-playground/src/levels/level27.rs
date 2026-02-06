@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, UINode, Visual, Rect, ToastState};
+use super::{fresh_rng, random_canvas_bg};
 
 #[derive(Clone, Copy, PartialEq)]
 enum ToastKind {
@@ -96,17 +96,15 @@ fn random_level27() -> Level27State {
     let toast_h = 60.0f32;
     let gap = rng.random_range(8.0..=16.0f32);
     let stack_h = count as f32 * (toast_h + gap);
-    let margin = 60.0;
-
-    // Stack position — toasts stack vertically
-    let stack_x = rng.random_range(margin..(Position::VIEWPORT - toast_w - margin).max(margin + 1.0));
-    let stack_start_y = rng.random_range(margin..(Position::VIEWPORT - stack_h - margin).max(margin + 1.0));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (stack_x, stack_start_y) = super::safe_position_in(&mut rng, toast_w, stack_h, 60.0, vp_w * 1.3, vp_h * 1.3);
 
     for i in 0..count {
         let mi = rng.random_range(0..msg_pool.len());
         let msg_idx = msg_pool.remove(mi);
         let (message, kind) = MESSAGES[msg_idx];
-        let y = stack_start_y + i as f32 * (toast_h + gap);
+        // Y relative to the stack container, not the viewport
+        let y = i as f32 * (toast_h + gap);
         toasts.push(ToastInfo { message: message.to_string(), kind, y });
     }
 
@@ -130,6 +128,7 @@ pub fn Level27() -> Element {
     let target_idx = st.target_idx;
     let style = st.style;
     let stack_x = st.stack_x;
+    let stack_start_y = st.stack_start_y;
     let toast_w = st.toast_w;
     drop(st);
 
@@ -139,26 +138,31 @@ pub fn Level27() -> Element {
 
     let target_toast = &toasts[target_idx];
     let target_msg = target_toast.message.clone();
-    let target_kind = target_toast.kind;
-    let target_y = target_toast.y;
+    let _target_kind = target_toast.kind;
+    // Target Y in viewport coords for ground truth
+    let target_y = stack_start_y + target_toast.y;
     let instruction = format!("Dismiss the \"{}\" notification", target_msg);
 
     let border_radius = match style { 0 => "14px", 1 => "4px", _ => "8px" };
 
-    // Ground truth
-    let toasts_desc: String = toasts.iter().enumerate().map(|(i, t)| {
-        let vis = if cur_visible.get(i).copied().unwrap_or(false) { "" } else { " [HIDDEN]" };
-        let target = if i == target_idx { " (TARGET)" } else { "" };
-        format!("{} \"{}\"{}{}", t.kind.label(), t.message, target, vis)
-    }).collect::<Vec<_>>().join(", ");
+    // Ground truth — build UINode tree (viewport-absolute coords)
     let stack_h_est = toast_count as f32 * 72.0;
-    let position_desc = describe_position(stack_x, toasts[0].y, toast_w, stack_h_est);
-    let description = format!(
-        "toast notifications, {} toasts: [{}], style: {}, at {}",
-        toast_count, toasts_desc,
-        match style { 0 => "rounded", 1 => "sharp", _ => "standard" },
-        position_desc
-    );
+    let card_rect = Rect::new(stack_x, stack_start_y, toast_w, stack_h_est);
+    let children: Vec<UINode> = toasts.iter().enumerate().map(|(i, t)| {
+        let toast_rect = Rect::new(stack_x, stack_start_y + t.y, toast_w, 60.0);
+        let kind_label = t.kind.label();
+        if i == target_idx {
+            ui_node::toast(&t.message, toast_rect, kind_label, &t.message)
+        } else {
+            UINode::Toast(
+                Visual::new(&t.message, toast_rect),
+                ToastState { kind: kind_label.to_string(), message: t.message.clone() },
+            )
+        }
+    }).collect();
+    let tree = ui_node::card(card_rect, children);
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     rsx! {
         div {
@@ -187,7 +191,7 @@ pub fn Level27() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 // Instruction
                 div {
@@ -198,97 +202,96 @@ pub fn Level27() -> Element {
                     }
                 }
 
-                // Toast notifications
-                for ti in 0..toast_count {
-                    {
-                        let toast = toasts[ti].clone();
-                        let is_vis = cur_visible.get(ti).copied().unwrap_or(false);
+                // Toast stack — single container so fixup centers them as a group
+                div {
+                    style: "position: absolute; left: {stack_x}px; top: {stack_start_y}px; width: {toast_w}px; height: {stack_h_est}px;",
 
-                        if !is_vis {
-                            return rsx! {};
-                        }
+                    for ti in 0..toast_count {
+                        {
+                            let toast = toasts[ti].clone();
+                            let is_vis = cur_visible.get(ti).copied().unwrap_or(false);
 
-                        let kind_color = toast.kind.color();
-                        let kind_icon = toast.kind.icon();
-                        let wrong_flash = is_wrong && ti == target_idx;
+                            if !is_vis {
+                                return rsx! {};
+                            }
 
-                        // Toast bar styling
-                        let toast_bg = if wrong_flash { "#fef2f2" } else { "white" };
-                        let left_border = if wrong_flash {
-                            "4px solid #ef4444".to_string()
-                        } else {
-                            format!("4px solid {}", kind_color)
-                        };
+                            let kind_color = toast.kind.color();
+                            let kind_icon = toast.kind.icon();
+                            let wrong_flash = is_wrong && ti == target_idx;
 
-                        let shadow = match style {
-                            0 => "0 4px 20px rgba(0,0,0,0.15)",
-                            1 => "0 1px 6px rgba(0,0,0,0.12)",
-                            _ => "0 2px 12px rgba(0,0,0,0.14)",
-                        };
+                            let toast_bg = if wrong_flash { "#fef2f2" } else { "white" };
+                            let left_border = if wrong_flash {
+                                "4px solid #ef4444".to_string()
+                            } else {
+                                format!("4px solid {}", kind_color)
+                            };
 
-                        let toast_style = format!(
-                            "position: absolute; left: {}px; top: {}px; width: {}px; \
-                             background: {}; border-radius: {}; border-left: {}; \
-                             box-shadow: {}; padding: 14px 16px; \
-                             display: flex; align-items: center; gap: 12px; \
-                             font-family: system-ui, sans-serif; box-sizing: border-box; \
-                             transition: opacity 0.2s;",
-                            stack_x, toast.y, toast_w, toast_bg, border_radius,
-                            left_border, shadow
-                        );
+                            let shadow = match style {
+                                0 => "0 4px 20px rgba(0,0,0,0.15)",
+                                1 => "0 1px 6px rgba(0,0,0,0.12)",
+                                _ => "0 2px 12px rgba(0,0,0,0.14)",
+                            };
 
-                        let icon_bg = format!("{}1a", kind_color);
+                            // Positions are relative to the stack container
+                            let toast_style = format!(
+                                "position: absolute; left: 0; top: {}px; width: 100%; \
+                                 background: {}; border-radius: {}; border-left: {}; \
+                                 box-shadow: {}; padding: 14px 16px; \
+                                 display: flex; align-items: center; gap: 12px; \
+                                 font-family: system-ui, sans-serif; box-sizing: border-box; \
+                                 transition: opacity 0.2s;",
+                                toast.y, toast_bg, border_radius,
+                                left_border, shadow
+                            );
 
-                        rsx! {
-                            div {
-                                style: "{toast_style}",
+                            let icon_bg = format!("{}1a", kind_color);
 
-                                // Icon circle
+                            rsx! {
                                 div {
-                                    style: "width: 28px; height: 28px; border-radius: 50%; background: {icon_bg}; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 13px; color: {kind_color};",
-                                    "{kind_icon}"
-                                }
+                                    style: "{toast_style}",
 
-                                // Message
-                                div {
-                                    style: "flex: 1; font-size: 13px; color: #374151; line-height: 1.4;",
-                                    "{toast.message}"
-                                }
+                                    div {
+                                        style: "width: 28px; height: 28px; border-radius: 50%; background: {icon_bg}; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 13px; color: {kind_color};",
+                                        "{kind_icon}"
+                                    }
 
-                                // Dismiss X button
-                                button {
-                                    class: if ti == target_idx { "target" } else { "" },
-                                    "data-label": "dismiss: {toast.message}",
-                                    style: "width: 24px; height: 24px; border: none; background: transparent; border-radius: 4px; font-size: 14px; color: #9ca3af; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-family: system-ui, sans-serif; transition: background 0.1s;",
-                                    tabindex: "-1",
-                                    onclick: move |_| {
-                                        if ti == target_idx {
-                                            // Hide the toast, then advance
-                                            let mut v = visible.write();
-                                            if let Some(val) = v.get_mut(ti) {
-                                                *val = false;
+                                    div {
+                                        style: "flex: 1; font-size: 13px; color: #374151; line-height: 1.4;",
+                                        "{toast.message}"
+                                    }
+
+                                    button {
+                                        class: if ti == target_idx { "target" } else { "" },
+                                        "data-label": "dismiss: {toast.message}",
+                                        style: "width: 24px; height: 24px; border: none; background: transparent; border-radius: 4px; font-size: 14px; color: #9ca3af; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-family: system-ui, sans-serif; transition: background 0.1s;",
+                                        tabindex: "-1",
+                                        onclick: move |_| {
+                                            if ti == target_idx {
+                                                let mut v = visible.write();
+                                                if let Some(val) = v.get_mut(ti) {
+                                                    *val = false;
+                                                }
+                                                drop(v);
+                                                spawn(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(300).await;
+                                                    score.set(score() + 1);
+                                                    bg.set(random_canvas_bg());
+                                                    let new_st = random_level27();
+                                                    let new_vis = vec![true; new_st.toasts.len()];
+                                                    state.set(new_st);
+                                                    visible.set(new_vis);
+                                                    wrong.set(false);
+                                                });
+                                            } else {
+                                                wrong.set(true);
+                                                spawn(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(600).await;
+                                                    wrong.set(false);
+                                                });
                                             }
-                                            drop(v);
-                                            // Short delay then advance
-                                            spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(300).await;
-                                                score.set(score() + 1);
-                                                bg.set(random_canvas_bg());
-                                                let new_st = random_level27();
-                                                let new_vis = vec![true; new_st.toasts.len()];
-                                                state.set(new_st);
-                                                visible.set(new_vis);
-                                                wrong.set(false);
-                                            });
-                                        } else {
-                                            wrong.set(true);
-                                            spawn(async move {
-                                                gloo_timers::future::TimeoutFuture::new(600).await;
-                                                wrong.set(false);
-                                            });
-                                        }
-                                    },
-                                    "\u{2715}"
+                                        },
+                                        "\u{2715}"
+                                    }
                                 }
                             }
                         }
@@ -302,7 +305,7 @@ pub fn Level27() -> Element {
                 target_y: target_y,
                 target_w: toast_w,
                 target_h: 60.0,
-                steps: format!(r#"[{{"action":"click","target":"dismiss: {}"}}]"#, target_msg),
+                tree: Some(tree.clone()),
             }
         }
     }

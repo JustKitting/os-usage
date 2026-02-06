@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect, UINode, Visual, InputState};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const COLUMN_NAMES: &[&str] = &[
     "Name", "Email", "Phone", "City", "Code", "Notes",
@@ -91,8 +91,8 @@ fn random_level13() -> Level13State {
     let card_h = (body_rows + 1) as f32 * row_h + 110.0;
 
     let margin = 50.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, margin, vp_w * 1.3, vp_h * 1.3);
 
     Level13State { cols, body_rows, headers, placeholders, target_row, target_col, target_word, mode, x, y }
 }
@@ -126,6 +126,7 @@ pub fn Level13() -> Element {
     let target_ph = placeholders[target_idx].clone();
     let wf = wrong_field();
     let is_wrong = wrong();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     let col_w: f32 = match cols { 3 => 130.0, 4 => 110.0, 5 => 95.0, _ => 82.0 };
     let content_w = cols as f32 * col_w;
@@ -136,24 +137,40 @@ pub fn Level13() -> Element {
     let submit_bg = if is_wrong { "#ef4444" } else { "#4f46e5" };
 
     // Ground truth
-    let total_inputs = cols * body_rows;
-    let ph_count = placeholders.iter().filter(|p| !p.is_empty()).count();
-    let mode_desc = match mode {
-        1 => format!("by row+column (row {}, \"{}\")", target_row + 1, target_header),
-        2 => format!("by placeholder \"{}\"", target_ph),
-        _ => format!("by ordinal ({})", target_ord),
-    };
     let card_total_w = content_w + 32.0;
     let card_h = (body_rows + 1) as f32 * 34.0 + 110.0;
-    let position_desc = describe_position(card_x, card_y, card_total_w, card_h);
-    let description = format!(
-        "table {}cols x {}rows, headers: [{}], {} inputs ({} with placeholders), target: row {} col \"{}\" ({}), mode: {}, type \"{}\", at {}",
-        cols, body_rows, headers.join(", "),
-        total_inputs, ph_count,
-        target_row + 1, target_header, target_ord,
-        mode_desc, target_word, position_desc
-    );
 
+    // Build UINode tree for ground truth
+    let row_h: f32 = 34.0;
+    let input_nodes: Vec<UINode> = {
+        let mut nodes = Vec::new();
+        for ri in 0..body_rows {
+            for ci in 0..cols {
+                let cell_idx = ri * cols + ci;
+                let ph = &placeholders[cell_idx];
+                let cell_rect = Rect::new(
+                    card_x + 16.0 + ci as f32 * col_w,
+                    card_y + 70.0 + (ri + 1) as f32 * row_h,
+                    col_w,
+                    row_h,
+                );
+                if cell_idx == target_idx {
+                    nodes.push(ui_node::text_input(&headers[ci], cell_rect, ph.as_str(), &target_word));
+                } else {
+                    nodes.push(UINode::TextInput(
+                        Visual::new(&headers[ci], cell_rect),
+                        InputState { placeholder: ph.clone(), current_value: String::new(), target_value: String::new() },
+                    ));
+                }
+            }
+        }
+        nodes
+    };
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, card_total_w, card_h),
+        "Submit",
+        input_nodes,
+    );
     rsx! {
         div {
             style: "min-height: 100vh; background: #0f0f1a; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: system-ui, sans-serif;",
@@ -181,7 +198,7 @@ pub fn Level13() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -312,12 +329,12 @@ pub fn Level13() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: card_x,
                 target_y: card_y,
                 target_w: card_total_w,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"type","target":"{}","value":"{}"}},{{"action":"click","target":"Submit"}}]"#, target_header, target_word),
+                tree: Some(tree.clone()),
             }
         }
     }

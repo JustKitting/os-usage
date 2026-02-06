@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, UINode, Visual, Rect, TagState};
+use super::{fresh_rng, random_canvas_bg};
 
 struct TagScenario {
     title: &'static str,
@@ -133,9 +133,8 @@ fn random_level26() -> Level26State {
 
     let card_w = rng.random_range(320.0..=460.0f32);
     let card_h = 280.0;
-    let margin = 60.0;
-    let card_x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let card_y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (card_x, card_y) = super::safe_position_in(&mut rng, card_w, card_h, 60.0, vp_w * 1.3, vp_h * 1.3);
 
     Level26State { scenario_idx, available, initially_selected, target_tags, mode, style, accent, card_x, card_y, card_w }
 }
@@ -199,22 +198,23 @@ pub fn Level26() -> Element {
 
     let submit_bg = if is_wrong { "#ef4444" } else { &accent };
 
-    // Ground truth
-    let tags_desc: String = available.iter().enumerate().map(|(i, &si)| {
+    // Ground truth — build UINode tree
+    let card_rect = Rect::new(card_x, card_y, card_w, 280.0);
+    let children: Vec<UINode> = available.iter().enumerate().map(|(i, &si)| {
         let label = scenario.tags[si];
-        let sel_mark = if cur_sel.get(i).copied().unwrap_or(false) { " [SEL]" } else { "" };
-        let target_mark = if target_tags.contains(&i) { " (TARGET)" } else { "" };
-        format!("\"{}\"{}{}",  label, sel_mark, target_mark)
-    }).collect::<Vec<_>>().join(", ");
-    let position_desc = describe_position(card_x, card_y, card_w, 280.0);
-    let description = format!(
-        "multi-select tags, title: \"{}\", mode: {}, tags: [{}], style: {}, at {}",
-        title,
-        match mode { TagMode::Add => "add", TagMode::Remove => "remove" },
-        tags_desc,
-        match style { 0 => "rounded", 1 => "sharp", _ => "standard" },
-        position_desc
-    );
+        let is_sel = cur_sel.get(i).copied().unwrap_or(false);
+        let tag_rect = Rect::new(card_x, card_y, card_w, 280.0);
+        if target_tags.contains(&i) {
+            // Target tag — use the builder which sets is_target = true
+            ui_node::tag(label, tag_rect, is_sel)
+        } else {
+            // Non-target tag
+            UINode::Tag(Visual::new(label, tag_rect), TagState { is_selected: is_sel })
+        }
+    }).collect();
+    let tree = ui_node::form(card_rect, "Submit", children);
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     rsx! {
         div {
@@ -243,7 +243,7 @@ pub fn Level26() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 // Instruction
                 div {
@@ -361,13 +361,7 @@ pub fn Level26() -> Element {
                 target_y: card_y,
                 target_w: card_w,
                 target_h: 280.0,
-                steps: {
-                    let mut parts: Vec<String> = target_labels.iter()
-                        .map(|l| format!(r#"{{"action":"click","target":"{}"}}"#, l))
-                        .collect();
-                    parts.push(r#"{"action":"click","target":"Submit"}"#.to_string());
-                    format!("[{}]", parts.join(","))
-                },
+                tree: Some(tree.clone()),
             }
         }
     }

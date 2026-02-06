@@ -98,7 +98,7 @@ pub fn CustomSelect(
                             let window_h = web_sys::window()
                                 .and_then(|w| w.inner_height().ok())
                                 .and_then(|v| v.as_f64())
-                                .unwrap_or(1024.0);
+                                .unwrap_or(crate::primitives::viewport_size().1 as f64);
                             let top_screen = if (bottom + panel_screen_h) > window_h {
                                 rect.y() - panel_screen_h
                             } else {

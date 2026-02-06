@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, UINode, Visual, Rect};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const SECTION_LABELS: &[&str] = &[
     "Personal Information", "Payment Details", "Shipping Address",
@@ -88,8 +88,8 @@ fn random_level21() -> Level21State {
     let open_count = initially_open.iter().filter(|&&o| o).count();
     let card_h = count as f32 * 48.0 + open_count as f32 * 80.0 + 120.0;
     let margin = 50.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, margin, vp_w * 1.3, vp_h * 1.3);
 
     Level21State { sections, target_section, initially_open, mode, style, accent, x, y, card_w }
 }
@@ -136,23 +136,22 @@ pub fn Level21() -> Element {
     );
     let submit_bg = if is_wrong { "#ef4444" } else { "#4f46e5" };
 
-    // Ground truth
-    let sections_desc: String = sections.iter().enumerate().map(|(i, s)| {
-        let open_mark = if cur_open.get(i).copied().unwrap_or(false) { " [OPEN]" } else { " [CLOSED]" };
-        let target_mark = if i == target_section { " (TARGET)" } else { "" };
-        format!("\"{}\"{}{}",  s.label, open_mark, target_mark)
-    }).collect::<Vec<_>>().join(", ");
-    // Estimate rendered height
+    // Ground truth — build UINode tree
     let open_count = cur_open.iter().filter(|&&o| o).count();
     let est_h = section_count as f32 * 48.0 + open_count as f32 * 80.0 + 120.0;
-    let position_desc = describe_position(card_x, card_y, card_w, est_h);
-    let description = format!(
-        "accordion, {} sections: [{}], style: {}, mode: {}, at {}",
-        section_count, sections_desc,
-        match style { 0 => "divider", 1 => "card", _ => "minimal" },
-        match mode { 1 => "ordinal", _ => "by label" },
-        position_desc
-    );
+    let card_rect = Rect::new(card_x, card_y, card_w, est_h);
+    let children: Vec<UINode> = sections.iter().enumerate().map(|(i, s)| {
+        let sec_rect = Rect::new(card_x, card_y, card_w, est_h);
+        if i == target_section {
+            ui_node::accordion(&s.label, sec_rect)
+        } else {
+            // Non-target accordion section
+            UINode::Accordion(Visual::new(&s.label, sec_rect))
+        }
+    }).collect();
+    let tree = ui_node::form(card_rect, "Submit", children);
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     rsx! {
         div {
@@ -181,7 +180,7 @@ pub fn Level21() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -305,7 +304,7 @@ pub fn Level21() -> Element {
                 target_y: card_y,
                 target_w: card_w,
                 target_h: est_h,
-                steps: format!(r#"[{{"action":"click","target":"{}"}}]"#, target_label),
+                tree: Some(tree.clone()),
             }
         }
     }

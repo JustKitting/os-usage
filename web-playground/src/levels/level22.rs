@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, UINode, Visual, Rect};
+use super::{fresh_rng, random_canvas_bg};
 
 struct DialogScenario {
     title: &'static str,
@@ -52,8 +52,8 @@ fn random_level22() -> Level22State {
     let modal_w = rng.random_range(320.0..=440.0f32);
     let modal_h = 220.0;
     let margin = 60.0;
-    let modal_x = rng.random_range(margin..(Position::VIEWPORT - modal_w - margin).max(margin + 1.0));
-    let modal_y = rng.random_range(margin..(Position::VIEWPORT - modal_h - margin).max(margin + 1.0));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (modal_x, modal_y) = super::safe_position_in(&mut rng, modal_w, modal_h, margin, vp_w * 1.3, vp_h * 1.3);
 
     let has_close = rng.random_bool(0.5);
 
@@ -110,22 +110,32 @@ pub fn Level22() -> Element {
         modal_x, modal_y, modal_w, border_radius, shadow
     );
 
-    // Ground truth
+    // Ground truth — build UINode tree
     let modal_h_est = 220.0f32;
-    let position_desc = describe_position(modal_x, modal_y, modal_w, modal_h_est);
-    let buttons_desc: String = buttons.iter().enumerate().map(|(i, b)| {
-        let marker = if !target_is_close && i == target_button { " (TARGET)" } else { "" };
-        format!("\"{}\"{}",  b, marker)
-    }).collect::<Vec<_>>().join(", ");
-    let close_desc = if has_close {
-        if target_is_close { ", close X (TARGET)" } else { ", close X" }
-    } else { "" };
-    let description = format!(
-        "modal dialog, title: \"{}\", buttons: [{}{}], style: {}, at {}",
-        title, buttons_desc, close_desc,
-        match style { 0 => "rounded", 1 => "sharp", _ => "standard" },
-        position_desc
-    );
+    let modal_rect = Rect::new(modal_x, modal_y, modal_w, modal_h_est);
+    let mut children: Vec<UINode> = Vec::new();
+
+    // Close button (X)
+    if has_close {
+        if target_is_close {
+            children.push(UINode::ModalButton(Visual::new("close", modal_rect).target()));
+        } else {
+            children.push(UINode::ModalButton(Visual::new("close", modal_rect)));
+        }
+    }
+
+    // Dialog buttons
+    for (i, b) in buttons.iter().enumerate() {
+        if !target_is_close && i == target_button {
+            children.push(UINode::ModalButton(Visual::new(*b, modal_rect).target()));
+        } else {
+            children.push(UINode::ModalButton(Visual::new(*b, modal_rect)));
+        }
+    }
+
+    let tree = ui_node::card(modal_rect, children);
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     rsx! {
         div {
@@ -154,7 +164,7 @@ pub fn Level22() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 // Fake background content (dimmed by overlay)
                 div {
@@ -288,11 +298,7 @@ pub fn Level22() -> Element {
                 target_y: modal_y,
                 target_w: modal_w,
                 target_h: modal_h_est,
-                steps: if target_is_close {
-                    r#"[{"action":"click","target":"close"}]"#.to_string()
-                } else {
-                    format!(r#"[{{"action":"click","target":"{}"}}]"#, buttons[target_button])
-                },
+                tree: Some(tree.clone()),
             }
         }
     }

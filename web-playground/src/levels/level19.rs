@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const RATING_LABELS: &[&str] = &[
     "Quality", "Service", "Value", "Cleanliness", "Comfort",
@@ -78,8 +78,7 @@ fn random_level19() -> Level19State {
     let row_h = 60.0;
     let card_h = count as f32 * row_h + 120.0;
     let margin = 50.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (x, y) = super::safe_position(&mut rng, card_w, card_h, margin);
 
     Level19State { ratings, target_rating, mode, x, y, card_w }
 }
@@ -132,19 +131,29 @@ pub fn Level19() -> Element {
     );
     let submit_bg = if is_wrong { "#ef4444" } else { "#4f46e5" };
 
-    // Ground truth
-    let ratings_desc: String = ratings.iter().enumerate().map(|(i, r)| {
-        let marker = if i == target_rating { " (TARGET)" } else { "" };
+    // Ground truth via UINode tree
+    let star_nodes: Vec<_> = ratings.iter().enumerate().map(|(i, r)| {
         let cv = cur_vals.get(i).copied().unwrap_or(r.start_val);
-        format!("\"{}\" {}/{} stars target={} current={}{}", r.label, r.max_stars, r.max_stars, r.target_val, cv, marker)
-    }).collect::<Vec<_>>().join(", ");
-    let position_desc = describe_position(card_x, card_y, card_w, card_h);
-    let description = format!(
-        "star rating, {} ratings: [{}], mode: {}, at {}",
-        rating_count, ratings_desc,
-        match mode { 1 => "ordinal", _ => "by label" },
-        position_desc
+        let row_y = 40.0 + i as f32 * row_h;
+        let mut node = ui_node::star_rating(
+            &r.label,
+            Rect::new(card_x + 16.0, card_y + row_y, card_w - 32.0, row_h),
+            cv,
+            r.target_val,
+            r.max_stars,
+        );
+        if i != target_rating {
+            node.visual_mut().is_target = false;
+        }
+        node
+    }).collect();
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, card_w, card_h),
+        "Submit",
+        star_nodes,
     );
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), false);
 
     rsx! {
         div {
@@ -173,7 +182,7 @@ pub fn Level19() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -274,7 +283,7 @@ pub fn Level19() -> Element {
                 target_y: card_y,
                 target_w: card_w,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"click","target":"star {} of {}"}}]"#, target_val, target_label),
+                tree: Some(tree.clone()),
             }
         }
     }

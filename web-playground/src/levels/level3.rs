@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg};
 
 const WORDS: &[&str] = &[
     "hello", "world", "search", "login", "submit", "click", "enter",
@@ -55,8 +55,7 @@ fn random_level3() -> Level3State {
     let style_idx = rng.random_range(0..INPUT_STYLES.len());
     let is = &INPUT_STYLES[style_idx];
     let pad = 150.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - is.width - pad).max(pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - is.height - pad).max(pad));
+    let (x, y) = super::safe_position(&mut rng, is.width, is.height, pad);
 
     Level3State {
         word: WORDS[word_idx].to_string(),
@@ -88,13 +87,16 @@ pub fn Level3() -> Element {
 
     let input_w = INPUT_STYLES[style_idx].width;
     let input_h = INPUT_STYLES[style_idx].height;
-    let position_desc = describe_position(input_x, input_y, input_w, input_h);
-    let current_val = input_value.read().clone();
-    let description = if current_val.is_empty() {
-        format!("{} (text input), target: \"{}\", at {}", input_label, target_word, position_desc)
-    } else {
-        format!("{} (text input), target: \"{}\", current: \"{}\", at {}", input_label, target_word, current_val, position_desc)
-    };
+
+    // Build UINode tree for ground truth
+    let tree = ui_node::text_input(
+        input_label,
+        Rect::new(input_x, input_y, input_w, input_h),
+        "Type here...",
+        &target_word,
+    );
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), false);
 
     rsx! {
         div {
@@ -127,7 +129,7 @@ pub fn Level3() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{pos_style}",
@@ -159,7 +161,7 @@ pub fn Level3() -> Element {
                 target_y: input_y,
                 target_w: input_w,
                 target_h: input_h,
-                steps: format!(r#"[{{"action":"type","target":"Type here...","value":"{}"}}]"#, target_word),
+                tree: Some(tree.clone()),
             }
         }
     }

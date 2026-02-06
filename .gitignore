@@ -23,6 +23,10 @@ target/
 web-playground/dist/
 web-playground/.dioxus/
 
+# Traces / screenshots
+traces/
+wandb/
+
 # Misc tooling caches
 .DS_Store
 .idea/

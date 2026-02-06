@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg};
 
 /// Each scenario has a search placeholder and a pool of suggestions.
 struct SearchScenario {
@@ -89,9 +89,8 @@ fn random_level24() -> Level24State {
     let card_w = rng.random_range(280.0..=400.0f32);
     let item_h = 40.0f32;
     let card_h = 52.0 + count as f32 * item_h + 16.0;
-    let margin = 60.0;
-    let card_x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let card_y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (card_x, card_y) = super::safe_position_in(&mut rng, card_w, card_h, 60.0, vp_w * 1.3, vp_h * 1.3);
 
     Level24State { scenario_idx, visible_items, target_item, style, accent, card_x, card_y, card_w, prefill }
 }
@@ -152,21 +151,21 @@ pub fn Level24() -> Element {
 
     let item_radius = match style { 0 => "8px", 1 => "2px", _ => "6px" };
 
-    // Ground truth
-    let items_desc: String = visible_items.iter().enumerate().map(|(i, &si)| {
-        let label = scenario2.suggestions[si];
-        let marker = if i == target_item { " (TARGET)" } else { "" };
-        format!("\"{}\"{}",  label, marker)
-    }).collect::<Vec<_>>().join(", ");
+    // Ground truth via UINode tree
     let item_h_est = 40.0f32;
     let card_h_est = 52.0 + item_count as f32 * item_h_est + 16.0;
-    let position_desc = describe_position(card_x, card_y, card_w, card_h_est);
-    let description = format!(
-        "search autocomplete, placeholder: \"{}\", query: \"{}\", suggestions: [{}], style: {}, at {}",
-        placeholder, prefill, items_desc,
-        match style { 0 => "rounded", 1 => "sharp", _ => "standard" },
-        position_desc
+    let suggestion_y_start = card_y + 56.0; // after input area
+    let tree = ui_node::card(
+        Rect::new(card_x, card_y, card_w, card_h_est),
+        vec![
+            ui_node::target_button(
+                target_text,
+                Rect::new(card_x, suggestion_y_start + target_item as f32 * item_h_est, card_w, item_h_est),
+            ),
+        ],
     );
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     rsx! {
         div {
@@ -195,7 +194,7 @@ pub fn Level24() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 // Instruction
                 div {
@@ -300,7 +299,7 @@ pub fn Level24() -> Element {
                 target_y: card_y,
                 target_w: card_w,
                 target_h: card_h_est,
-                steps: format!(r#"[{{"action":"click","target":"{}"}}]"#, target_text),
+                tree: Some(tree.clone()),
             }
         }
     }

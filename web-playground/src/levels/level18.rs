@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect, UINode, Visual, StepperState};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const STEPPER_LABELS: &[&str] = &[
     "Quantity", "Guests", "Adults", "Children", "Rooms",
@@ -84,8 +84,7 @@ fn random_level18() -> Level18State {
     let stepper_h = 70.0;
     let card_h = count as f32 * stepper_h + 100.0;
     let margin = 50.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (x, y) = super::safe_position(&mut rng, card_w, card_h, margin);
 
     Level18State { steppers, target_stepper, mode, x, y, card_w }
 }
@@ -110,6 +109,7 @@ pub fn Level18() -> Element {
 
     let stepper_count = steppers.len();
     let is_wrong = wrong();
+    let viewport_style = super::viewport_style(&bg(), false);
     let cur_vals: Vec<i32> = values.read().clone();
 
     let target_label = steppers[target_stepper].label.clone();
@@ -137,20 +137,32 @@ pub fn Level18() -> Element {
     );
     let submit_bg = if is_wrong { "#ef4444" } else { "#4f46e5" };
 
-    // Ground truth
-    let steppers_desc: String = steppers.iter().enumerate().map(|(i, s)| {
-        let marker = if i == target_stepper { " (TARGET)" } else { "" };
+    // Ground truth via UINode tree
+    let stepper_nodes: Vec<UINode> = steppers.iter().enumerate().map(|(i, s)| {
         let cv = cur_vals.get(i).copied().unwrap_or(s.start_val);
-        format!("\"{}\" range {}-{} step {} target={} current={} style={}{}", s.label, s.min, s.max, s.step, s.target_val, cv, s.style, marker)
-    }).collect::<Vec<_>>().join(", ");
-    let position_desc = describe_position(card_x, card_y, card_w, card_h);
-    let description = format!(
-        "number stepper, {} steppers: [{}], mode: {}, at {}",
-        stepper_count, steppers_desc,
-        match mode { 1 => "ordinal", _ => "by label" },
-        position_desc
+        let row_y = 40.0 + i as f32 * stepper_h;
+        let mut node = UINode::Stepper(
+            Visual::new(&s.label, Rect::new(card_x + 16.0, card_y + row_y, card_w - 32.0, stepper_h)),
+            StepperState {
+                min: s.min,
+                max: s.max,
+                step: s.step,
+                current_val: cv,
+                target_val: s.target_val,
+                minus_label: format!("\u{2212}: {}", s.label),
+                plus_label: format!("+: {}", s.label),
+            },
+        );
+        if i == target_stepper {
+            node.visual_mut().is_target = true;
+        }
+        node
+    }).collect();
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, card_w, card_h),
+        "Submit",
+        stepper_nodes,
     );
-
     rsx! {
         div {
             style: "min-height: 100vh; background: #0f0f1a; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: system-ui, sans-serif;",
@@ -178,7 +190,7 @@ pub fn Level18() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -321,29 +333,12 @@ pub fn Level18() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: card_x,
                 target_y: card_y,
                 target_w: card_w,
                 target_h: card_h,
-                steps: {
-                    let s = &steppers[target_stepper];
-                    let current = cur_vals.get(target_stepper).copied().unwrap_or(s.start_val);
-                    let diff = target_val - current;
-                    let step_size = s.step;
-                    let mut parts: Vec<String> = Vec::new();
-                    if diff > 0 {
-                        for _ in 0..(diff / step_size) {
-                            parts.push(format!(r#"{{"action":"click","target":"+: {}"}}"#, target_label));
-                        }
-                    } else {
-                        for _ in 0..((-diff) / step_size) {
-                            parts.push(format!(r#"{{"action":"click","target":"−: {}"}}"#, target_label));
-                        }
-                    }
-                    parts.push(r#"{"action":"click","target":"Submit"}"#.to_string());
-                    format!("[{}]", parts.join(","))
-                },
+                tree: Some(tree.clone()),
             }
         }
     }

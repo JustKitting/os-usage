@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect, UINode, Visual, InputState, DropdownState, ToggleState};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const INPUT_LABELS: &[&str] = &[
     "Username", "Email", "Password", "First name", "Last name",
@@ -95,8 +95,8 @@ fn random_level9() -> Level9State {
     let card_w = 340.0;
     let card_h = 80.0 + (count as f32 * 72.0);
     let pad = 80.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - card_w - pad).max(pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - card_h - pad).max(pad));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, pad, vp_w * 1.3, vp_h * 1.3);
 
     Level9State { by_name, inputs, target_idx, target_word, target_select, x, y }
 }
@@ -129,40 +129,51 @@ pub fn Level9() -> Element {
 
     // Ground truth
     let card_h = 80.0 + (input_count as f32 * 72.0);
-    let position_desc = describe_position(card_x, card_y, 340.0, card_h);
 
-    let inputs_desc = inputs_data.iter().enumerate()
-        .map(|(i, (label, kind, opts))| {
-            let kind_str = match kind {
-                0 => "text".to_string(),
-                1 => format!("dropdown: {}", opts.iter().map(|o| format!("\"{}\"", o)).collect::<Vec<_>>().join(", ")),
-                _ => "toggle".to_string(),
-            };
-            if i == target_idx {
-                format!("\"{}\" ({}, target)", label, kind_str)
-            } else {
-                format!("\"{}\" ({})", label, kind_str)
+    // Build UINode tree for ground truth
+    let input_nodes: Vec<UINode> = inputs_data.iter().enumerate().map(|(i, (label, kind, opts))| {
+        let is_target = i == target_idx;
+        let row_y = card_y + 60.0 + i as f32 * 72.0;
+        let rect = Rect::new(card_x + 20.0, row_y, 260.0, 36.0);
+        match kind {
+            0 => {
+                if is_target {
+                    ui_node::text_input(label.as_str(), rect, "Type here...", &target_word)
+                } else {
+                    UINode::TextInput(
+                        Visual::new(label.as_str(), rect),
+                        InputState { placeholder: "Type here...".into(), current_value: String::new(), target_value: String::new() },
+                    )
+                }
             }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let action_desc = match target_kind {
-        0 => format!("type \"{}\"", target_word),
-        1 => format!("select \"{}\"", target_select),
-        _ => "toggle on".to_string(),
-    };
-
-    let ref_desc = if by_name {
-        format!("\"{}\" (by name)", target_label)
-    } else {
-        format!("{} input (by ordinal)", target_ord)
-    };
-
-    let description = format!(
-        "mixed input card, {} inputs: {}, {}, target: {}, at {}",
-        input_count, inputs_desc, action_desc, ref_desc, position_desc
+            1 => {
+                if is_target {
+                    ui_node::dropdown(label.as_str(), rect, opts.clone(), &target_select)
+                } else {
+                    UINode::Dropdown(
+                        Visual::new(label.as_str(), rect),
+                        DropdownState { options: opts.clone(), selected: None, target_option: String::new(), trigger_label: "Choose...".into() },
+                    )
+                }
+            }
+            _ => {
+                if is_target {
+                    ui_node::toggle(label.as_str(), rect, false)
+                } else {
+                    UINode::Toggle(
+                        Visual::new(label.as_str(), rect),
+                        ToggleState { is_on: false },
+                    )
+                }
+            }
+        }
+    }).collect();
+    let tree = ui_node::card(
+        Rect::new(card_x, card_y, 340.0, card_h),
+        input_nodes,
     );
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     let card_style = format!(
         "position: absolute; left: {}px; top: {}px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); width: 300px; font-family: system-ui, sans-serif;",
@@ -196,7 +207,7 @@ pub fn Level9() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -377,11 +388,7 @@ pub fn Level9() -> Element {
                 target_y: card_y,
                 target_w: 340.0,
                 target_h: card_h,
-                steps: match target_kind {
-                    0 => format!(r#"[{{"action":"type","target":"Type here...","value":"{}"}}]"#, target_word),
-                    1 => format!(r#"[{{"action":"click","target":"Choose..."}},{{"action":"click","target":"{}"}}]"#, target_select),
-                    _ => format!(r#"[{{"action":"click","target":"{}"}}]"#, target_label),
-                },
+                tree: Some(tree.clone()),
             }
         }
     }

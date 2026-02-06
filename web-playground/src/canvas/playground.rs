@@ -9,7 +9,7 @@ use crate::primitives::Animation;
 use crate::transform::Sampler;
 use super::element::CanvasElement;
 
-/// The 1024x1024 training playground
+/// The dynamically-sized training playground
 #[component]
 pub fn Playground() -> Element {
     let pool = use_hook(|| ElementPool::with_builtins());
@@ -37,6 +37,8 @@ pub fn Playground() -> Element {
     };
 
     let keyframes = Animation::keyframes_css();
+
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
 
     rsx! {
         // Inject keyframe definitions once
@@ -114,7 +116,7 @@ pub fn Playground() -> Element {
 
             // Canvas
             div {
-                style: "width: 1024px; height: 1024px; background: #1a1a2e; position: relative; border: 1px solid #2a2a4a; overflow: hidden; animation: bg-shift {bg_speed}s infinite ease-in-out;",
+                style: "width: {vp_w}px; height: {vp_h}px; background: #1a1a2e; position: relative; border: 1px solid #2a2a4a; overflow: auto; animation: bg-shift {bg_speed}s infinite ease-in-out;",
 
                 for placed in elements() {
                     CanvasElement {
@@ -129,7 +131,7 @@ pub fn Playground() -> Element {
 
             // Ground truth descriptions
             div {
-                style: "width: 1024px; background: #111827; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; color: #9ca3af;",
+                style: "width: {vp_w}px; background: #111827; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; color: #9ca3af;",
                 h3 {
                     style: "margin: 0 0 8px 0; color: #e5e7eb; font-size: 13px;",
                     "Ground Truth"

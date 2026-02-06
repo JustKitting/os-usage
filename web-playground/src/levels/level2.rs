@@ -5,6 +5,7 @@ use crate::Route;
 use crate::pool::{ElementPool, ElementKind};
 use crate::primitives::Position;
 use crate::transform::{PlacedElement, Sampler};
+use crate::ui_node::{self, Rect};
 use super::{fresh_rng, random_canvas_bg};
 
 fn random_toggle(pool: &ElementPool) -> PlacedElement {
@@ -15,8 +16,7 @@ fn random_toggle(pool: &ElementPool) -> PlacedElement {
         .expect("pool has toggles/checkboxes");
 
     let pad = 150.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - pad));
+    let (x, y) = super::safe_position(&mut rng, snippet.approx_width, snippet.approx_height, pad);
     let pos = Position::new(x, y);
 
     PlacedElement::new(snippet, pos)
@@ -38,11 +38,15 @@ pub fn Level2() -> Element {
     } else {
         current.snippet.html.clone()
     };
-    let active_str = if *is_active.read() { "on" } else { "off" };
+    let is_on = *is_active.read();
+    let active_str = if is_on { "on" } else { "off" };
     let description = format!("{}, state: {}", current.describe(), active_str);
     let (bx, by, bw, bh) = current.bounds();
     let target_text = super::ground_truth::strip_tags(&html).trim().to_string();
-    let steps = format!(r#"[{{"action":"click","target":"{}"}}]"#, target_text);
+    let viewport_style = super::viewport_style(&bg(), false);
+
+    // Build UINode tree for ground truth
+    let tree = ui_node::toggle(&target_text, Rect::new(bx, by, bw, bh), is_on);
     drop(current);
 
     let pool_click = pool.clone();
@@ -74,7 +78,7 @@ pub fn Level2() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     class: "target",
@@ -98,7 +102,7 @@ pub fn Level2() -> Element {
                 target_y: by,
                 target_w: bw,
                 target_h: bh,
-                steps: steps,
+                tree: Some(tree.clone()),
             }
         }
     }

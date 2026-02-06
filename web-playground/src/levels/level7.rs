@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect, UINode};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const WORDS: &[&str] = &[
     "hello", "world", "search", "login", "submit", "click", "enter",
@@ -44,8 +44,8 @@ fn random_level7() -> Level7State {
     let card_w = 340.0;
     let card_h = 70.0 + (count as f32 * 72.0);
     let pad = 80.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - card_w - pad).max(pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - card_h - pad).max(pad));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, pad, vp_w * 1.3, vp_h * 1.3);
 
     Level7State { word, target, labels, x, y }
 }
@@ -70,15 +70,34 @@ pub fn Level7() -> Element {
     let pressed = wrong_idx();
     let ordinal_str = ordinal(target + 1);
     let card_h = 70.0 + (labels.len() as f32 * 72.0);
-    let position_desc = describe_position(card_x, card_y, 340.0, card_h);
-    let inputs_desc = labels.iter().enumerate()
-        .map(|(i, l)| if i == target { format!("\"{}\" (target)", l) } else { format!("\"{}\"", l) })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let description = format!(
-        "input card with {} inputs: {}, enter \"{}\" into {} (\"{}\"), at {}",
-        labels.len(), inputs_desc, word, ordinal_str, labels[target], position_desc
+
+    // Build UINode tree for ground truth
+    let input_nodes: Vec<UINode> = labels.iter().enumerate().map(|(i, l)| {
+        if i == target {
+            ui_node::text_input(
+                l.as_str(),
+                Rect::new(card_x + 20.0, card_y + 50.0 + i as f32 * 72.0, 260.0, 36.0),
+                "Type here...",
+                &word,
+            )
+        } else {
+            // Non-target text inputs: just describe them but don't mark as target
+            UINode::TextInput(
+                crate::ui_node::Visual::new(l.as_str(), Rect::new(card_x + 20.0, card_y + 50.0 + i as f32 * 72.0, 260.0, 36.0)),
+                crate::ui_node::InputState {
+                    placeholder: "Type here...".into(),
+                    current_value: String::new(),
+                    target_value: String::new(),
+                },
+            )
+        }
+    }).collect();
+    let tree = ui_node::card(
+        Rect::new(card_x, card_y, 340.0, card_h),
+        input_nodes,
     );
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     let card_style = format!(
         "position: absolute; left: {}px; top: {}px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); width: 300px; font-family: system-ui, sans-serif;",
@@ -112,7 +131,7 @@ pub fn Level7() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -191,7 +210,7 @@ pub fn Level7() -> Element {
                 target_y: card_y,
                 target_w: 340.0,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"type","target":"Type here...","value":"{}"}}]"#, word),
+                tree: Some(tree.clone()),
             }
         }
     }

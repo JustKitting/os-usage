@@ -27,6 +27,7 @@ mod level24;
 mod level25;
 mod level26;
 mod level27;
+mod level_scroll;
 
 pub(crate) use custom_select::CustomSelect;
 pub(crate) use ground_truth::GroundTruth;
@@ -57,16 +58,17 @@ pub use level24::Level24;
 pub use level25::Level25;
 pub use level26::Level26;
 pub use level27::Level27;
+pub use level_scroll::LevelScroll;
 
 use rand::SeedableRng;
 use rand::Rng;
 use rand::rngs::SmallRng;
 use std::cell::{Cell, RefCell};
 use js_sys::Reflect;
-use wasm_bindgen::JsValue;
+use web_sys::wasm_bindgen::JsValue;
 
 use crate::pool::{ElementPool, ElementKind};
-use crate::primitives::Position;
+use crate::primitives::{Position, viewport_size};
 use crate::transform::{PlacedElement, Sampler};
 
 const CANVAS_COLORS: &[&str] = &[
@@ -78,8 +80,17 @@ const CANVAS_COLORS: &[&str] = &[
 ];
 
 pub fn random_canvas_bg() -> String {
+    reroll_viewport();
     let mut rng = fresh_rng();
     CANVAS_COLORS[rng.random_range(0..CANVAS_COLORS.len())].to_string()
+}
+
+/// Re-randomize the viewport scale factor for the next round.
+fn reroll_viewport() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = js_sys::eval("window.__rerollVpScale && window.__rerollVpScale()");
+    }
 }
 
 pub fn fresh_rng() -> SmallRng {
@@ -141,22 +152,51 @@ fn splitmix64(state: &mut u64) -> u64 {
     z ^ (z >> 31)
 }
 
+/// Pick a random position that keeps an element of size `(w, h)` fully inside
+/// the viewport.  Padding shrinks automatically when the element is large
+/// relative to the viewport, and the element is centred when it barely fits.
+pub fn safe_position(rng: &mut impl Rng, w: f32, h: f32, pad: f32) -> (f32, f32) {
+    let (vp_w, vp_h) = viewport_size();
+    safe_position_in(rng, w, h, pad, vp_w, vp_h)
+}
+
+/// Like `safe_position` but positions within a custom canvas size instead of
+/// the viewport.  Use with a canvas larger than the viewport for scrollable
+/// levels so elements may land off-screen.
+pub fn safe_position_in(rng: &mut impl Rng, w: f32, h: f32, pad: f32, canvas_w: f32, canvas_h: f32) -> (f32, f32) {
+    let max_x = (canvas_w - w).max(0.0);
+    let max_y = (canvas_h - h).max(0.0);
+    let pad_x = pad.min(max_x / 2.0);
+    let pad_y = pad.min(max_y / 2.0);
+    let x = if max_x < 1.0 { 0.0 } else { rng.random_range(pad_x..(max_x - pad_x).max(pad_x + 1.0)) };
+    let y = if max_y < 1.0 { 0.0 } else { rng.random_range(pad_y..(max_y - pad_y).max(pad_y + 1.0)) };
+    (x, y)
+}
+
 pub fn random_element(pool: &ElementPool, kind: ElementKind) -> PlacedElement {
     let mut rng = fresh_rng();
     let snippet = Sampler::pick_kind(&mut rng, pool, kind)
         .expect("pool has this kind");
 
-    let pad = 150.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - pad));
+    let (vp_w, vp_h) = viewport_size();
+    let pad = 150.0f32.min(vp_w.min(vp_h) / 4.0);
+    let (x, y) = safe_position(&mut rng, snippet.approx_width, snippet.approx_height, pad);
     let pos = Position::new(x, y);
 
     PlacedElement::new(snippet, pos)
 }
 
-pub fn describe_position(x: f32, y: f32, w: f32, h: f32) -> &'static str {
-    Position::new(x + w / 2.0, y + h / 2.0).describe()
+/// Generate the standard viewport div style with dynamic sizing.
+/// When `scrollable` is true the viewport gets `overflow: auto` so content
+/// that extends past the edges produces scrollbars instead of being clipped.
+pub fn viewport_style(bg: &str, scrollable: bool) -> String {
+    let (vp_w, vp_h) = viewport_size();
+    let overflow = if scrollable { "auto" } else { "hidden" };
+    format!(
+        "width: {vp_w}px; height: {vp_h}px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: {overflow}; transition: background 0.4s;",
+    )
 }
+
 
 pub fn ordinal(n: usize) -> String {
     let suffix = match (n % 10, n % 100) {

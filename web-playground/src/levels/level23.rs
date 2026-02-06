@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg};
 
 /// Context-menu scenarios: a trigger element + menu items.
 struct MenuScenario {
@@ -66,10 +66,8 @@ fn random_level23() -> Level23State {
 
     // Position trigger so menu fits in viewport
     let margin = 60.0;
-    let max_x = (Position::VIEWPORT - trigger_w - menu_w - margin).max(margin + 1.0);
-    let max_y = (Position::VIEWPORT - trigger_h - menu_h - margin).max(margin + 1.0);
-    let trigger_x = rng.random_range(margin..max_x);
-    let trigger_y = rng.random_range(margin..max_y);
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (trigger_x, trigger_y) = super::safe_position_in(&mut rng, trigger_w + menu_w, trigger_h + menu_h, margin, vp_w * 1.3, vp_h * 1.3);
 
     // Menu appears near the trigger (like a real right-click menu)
     let menu_offset_x = rng.random_range(10.0..40.0f32);
@@ -158,21 +156,17 @@ pub fn Level23() -> Element {
     // Separator index: place one separator roughly in the middle
     let sep_after = if has_separator { item_count / 2 } else { usize::MAX };
 
-    // Ground truth
-    let items_desc: String = items.iter().enumerate().map(|(i, it)| {
-        let marker = if i == target_item { " (TARGET)" } else { "" };
-        format!("\"{}\"{}",  it, marker)
-    }).collect::<Vec<_>>().join(", ");
+    // Ground truth via UINode tree
     let item_h_est = 36.0f32;
     let menu_h_est = item_count as f32 * item_h_est + 16.0;
-    let position_desc = describe_position(trigger_x, trigger_y, trigger_w, trigger_h);
-    let menu_pos_desc = describe_position(menu_x, menu_y, menu_w, menu_h_est);
-    let description = format!(
-        "context menu, trigger: \"{}\", at {}, menu items: [{}], menu at {}, style: {}, icons: {}",
-        trigger_label, position_desc, items_desc, menu_pos_desc,
-        match style { 0 => "rounded", 1 => "sharp", _ => "standard" },
-        if has_icons { "yes" } else { "no" }
+    let tree = ui_node::context_menu(
+        Rect::new(trigger_x, trigger_y, trigger_w, trigger_h),
+        trigger_label,
+        items.iter().map(|s| s.to_string()).collect(),
+        target_label,
     );
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     rsx! {
         div {
@@ -201,7 +195,7 @@ pub fn Level23() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 // Instruction
                 div {
@@ -303,7 +297,7 @@ pub fn Level23() -> Element {
                 target_y: menu_y,
                 target_w: menu_w,
                 target_h: menu_h_est,
-                steps: format!(r#"[{{"action":"right_click","target":"trigger"}},{{"action":"click","target":"{}"}}]"#, target_label),
+                tree: Some(tree.clone()),
             }
         }
     }

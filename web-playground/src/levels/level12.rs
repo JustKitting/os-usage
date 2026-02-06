@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect, UINode, Visual, InputState};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const FIELD_NAMES: &[&str] = &[
     "Name", "Email", "Phone", "Address", "City", "State",
@@ -97,8 +97,8 @@ fn random_level12() -> Level12State {
     let card_h = rows as f32 * row_h + (rows as f32 - 1.0) * gap + 110.0;
 
     let margin = 60.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, margin, vp_w * 1.3, vp_h * 1.3);
 
     Level12State { cols, rows, cells, target_input, target_word, mode, x, y }
 }
@@ -146,6 +146,7 @@ pub fn Level12() -> Element {
     let target_ord = ordinal(target_input + 1);
     let wf = wrong_field();
     let is_wrong = wrong();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     let cell_w: f32 = if cols <= 4 { 120.0 } else { 100.0 };
     let content_w = cols as f32 * cell_w + (cols as f32 - 1.0) * 8.0;
@@ -160,37 +161,44 @@ pub fn Level12() -> Element {
     let submit_bg = if is_wrong { "#ef4444" } else { "#4f46e5" };
 
     // Ground truth
-    let input_count = cells.iter().filter(|c| c.is_some()).count();
-    let inputs_desc: String = {
-        let mut ii = 0usize;
-        let mut parts = Vec::new();
-        for (ci, c) in cells.iter().enumerate() {
-            if let Some(cell) = c {
-                let r = ci / cols + 1;
-                let col = ci % cols + 1;
-                let kind = if cell.has_label { "label" } else { "placeholder" };
-                let marker = if ii == target_input { " (target)" } else { "" };
-                parts.push(format!("#{} row {} col {}: {} \"{}\"{}",
-                    ii + 1, r, col, kind, cell.name, marker));
-                ii += 1;
-            }
-        }
-        parts.join(", ")
-    };
-    let mode_desc = match mode {
-        1 => format!("by placeholder \"{}\"", target_name),
-        2 => format!("by label \"{}\"", target_name),
-        _ => format!("by ordinal ({})", target_ord),
-    };
+    let _input_count = cells.iter().filter(|c| c.is_some()).count();
     let card_total_w = content_w + 32.0;
     let row_h: f32 = if rows <= 3 { 65.0 } else { 55.0 };
     let card_h = rows as f32 * row_h + (rows as f32 - 1.0) * 8.0 + 110.0;
-    let position_desc = describe_position(card_x, card_y, card_total_w, card_h);
-    let description = format!(
-        "grid form {}x{}, {} inputs: [{}], mode: {}, type \"{}\", at {}",
-        cols, rows, input_count, inputs_desc, mode_desc, target_word, position_desc
-    );
 
+    // Build UINode tree for ground truth
+    let input_nodes: Vec<UINode> = {
+        let mut ii = 0usize;
+        let mut nodes = Vec::new();
+        for (ci, c) in cells.iter().enumerate() {
+            if let Some(cell) = c {
+                let r = ci / cols;
+                let col = ci % cols;
+                let cell_rect = Rect::new(
+                    card_x + 16.0 + col as f32 * (cell_w + 8.0),
+                    card_y + 70.0 + r as f32 * (row_h + 8.0),
+                    cell_w,
+                    row_h,
+                );
+                let ph = if cell.has_label { String::new() } else { cell.name.clone() };
+                if ii == target_input {
+                    nodes.push(ui_node::text_input(&cell.name, cell_rect, &ph, &target_word));
+                } else {
+                    nodes.push(UINode::TextInput(
+                        Visual::new(&cell.name, cell_rect),
+                        InputState { placeholder: ph, current_value: String::new(), target_value: String::new() },
+                    ));
+                }
+                ii += 1;
+            }
+        }
+        nodes
+    };
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, card_total_w, card_h),
+        "Submit",
+        input_nodes,
+    );
     rsx! {
         div {
             style: "min-height: 100vh; background: #0f0f1a; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: system-ui, sans-serif;",
@@ -218,7 +226,7 @@ pub fn Level12() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -334,12 +342,12 @@ pub fn Level12() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: card_x,
                 target_y: card_y,
                 target_w: card_total_w,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"type","target":"{}","value":"{}"}},{{"action":"click","target":"Submit"}}]"#, target_name, target_word),
+                tree: Some(tree.clone()),
             }
         }
     }

@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect, UINode, Visual, DropdownState};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const DROPDOWN_GROUPS: &[(&str, &[&str])] = &[
     ("Color", &["Red", "Blue", "Green", "Yellow", "Purple", "Orange", "Pink"]),
@@ -61,8 +61,8 @@ fn random_level8() -> Level8State {
     let card_w = 340.0;
     let card_h = 80.0 + (dropdown_count as f32 * 80.0);
     let pad = 80.0;
-    let x = rng.random_range(pad..(Position::VIEWPORT - card_w - pad).max(pad));
-    let y = rng.random_range(pad..(Position::VIEWPORT - card_h - pad).max(pad));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, pad, vp_w * 1.3, vp_h * 1.3);
 
     Level8State { select_by_word, dropdowns, target_dropdown, target_value, target_option_pos, x, y }
 }
@@ -93,38 +93,35 @@ pub fn Level8() -> Element {
 
     // Ground truth
     let card_h = 80.0 + (dropdown_count as f32 * 80.0);
-    let position_desc = describe_position(card_x, card_y, 340.0, card_h);
-    let dropdowns_desc = dropdowns_data.iter().enumerate()
-        .map(|(i, (label, opts))| {
-            let opts_str = opts.iter()
-                .map(|o| {
-                    if i == target_dropdown && *o == target_value {
-                        format!("\"{}\" (target)", o)
-                    } else {
-                        format!("\"{}\"", o)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            if i == target_dropdown {
-                format!("\"{}\" (target dropdown): {}", label, opts_str)
-            } else {
-                format!("\"{}\": {}", label, opts_str)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
 
-    let mode_desc = if select_by_word {
-        format!("select \"{}\" from {} dropdown", target_value, dropdown_ord)
-    } else {
-        format!("select {} option from {} dropdown (\"{}\")", option_ord, dropdown_ord, target_value)
-    };
-
-    let description = format!(
-        "multi-dropdown card, {} dropdowns: {}, {}, at {}",
-        dropdown_count, dropdowns_desc, mode_desc, position_desc
+    // Build UINode tree for ground truth
+    let dropdown_nodes: Vec<UINode> = dropdowns_data.iter().enumerate().map(|(i, (label, opts))| {
+        let is_target = i == target_dropdown;
+        if is_target {
+            ui_node::dropdown(
+                label.as_str(),
+                Rect::new(card_x + 20.0, card_y + 60.0 + i as f32 * 80.0, 260.0, 36.0),
+                opts.clone(),
+                &target_value,
+            )
+        } else {
+            UINode::Dropdown(
+                Visual::new(label.as_str(), Rect::new(card_x + 20.0, card_y + 60.0 + i as f32 * 80.0, 260.0, 36.0)),
+                DropdownState {
+                    options: opts.clone(),
+                    selected: None,
+                    target_option: String::new(),
+                    trigger_label: "Choose...".into(),
+                },
+            )
+        }
+    }).collect();
+    let tree = ui_node::card(
+        Rect::new(card_x, card_y, 340.0, card_h),
+        dropdown_nodes,
     );
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), true);
 
     let card_style = format!(
         "position: absolute; left: {}px; top: {}px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); width: 300px; font-family: system-ui, sans-serif;",
@@ -158,7 +155,7 @@ pub fn Level8() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -245,7 +242,7 @@ pub fn Level8() -> Element {
                 target_y: card_y,
                 target_w: 340.0,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"click","target":"Choose..."}},{{"action":"click","target":"{}"}}]"#, target_value),
+                tree: Some(tree.clone()),
             }
         }
     }

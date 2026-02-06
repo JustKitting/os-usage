@@ -11,18 +11,16 @@ pub mod snippet;
 pub use kind::ElementKind;
 pub use snippet::DesignSnippet;
 
-use std::collections::HashMap;
-
 /// The pool of all available design snippets, indexed by kind
 #[derive(Clone)]
 pub struct ElementPool {
-    snippets: HashMap<ElementKind, Vec<DesignSnippet>>,
+    snippets: std::collections::HashMap<ElementKind, Vec<DesignSnippet>>,
 }
 
 impl ElementPool {
     pub fn new() -> Self {
         Self {
-            snippets: HashMap::new(),
+            snippets: std::collections::HashMap::new(),
         }
     }
 
@@ -50,14 +48,6 @@ impl ElementPool {
     /// Get all snippets across all kinds
     pub fn all(&self) -> Vec<&DesignSnippet> {
         self.snippets.values().flat_map(|v| v.iter()).collect()
-    }
-
-    /// How many snippets of each kind
-    pub fn counts(&self) -> HashMap<ElementKind, usize> {
-        self.snippets
-            .iter()
-            .map(|(k, v)| (*k, v.len()))
-            .collect()
     }
 
     pub fn total(&self) -> usize {

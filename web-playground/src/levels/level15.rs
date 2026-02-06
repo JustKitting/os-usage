@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, describe_position};
+use crate::ui_node::{self, Rect};
+use super::{fresh_rng, random_canvas_bg};
 
 const FILE_POOL: &[(&str, &str, &str)] = &[
     ("report", "pdf", "#ef4444"),
@@ -58,7 +58,7 @@ fn random_level15() -> Level15State {
 
     let margin = 50.0;
     let gap = 30.0;
-    let vp = Position::VIEWPORT;
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
 
     // Sizes: drop zone first, then file icons
     let mut sizes: Vec<(f32, f32)> = vec![(drop_w, drop_h)];
@@ -72,8 +72,7 @@ fn random_level15() -> Level15State {
     for &(w, h) in &sizes {
         let mut pos = (margin, margin);
         for _ in 0..300 {
-            let x = rng.random_range(margin..(vp - w - margin).max(margin + 1.0));
-            let y = rng.random_range(margin..(vp - h - margin).max(margin + 1.0));
+            let (x, y) = super::safe_position_in(&mut rng, w, h, margin, vp_w * 1.3, vp_h * 1.3);
             let ok = rects.iter().all(|&(rx, ry, rw, rh)| {
                 x >= rx + rw + gap || x + w + gap <= rx || y >= ry + rh + gap || y + h + gap <= ry
             });
@@ -162,19 +161,17 @@ pub fn Level15() -> Element {
     let dz_border = if is_wrong { "#ef4444" } else if drag_over { "#4f46e5" } else { "#d1d5db" };
     let dz_bg = if is_wrong { "#fef2f2" } else if drag_over { "#eef2ff" } else { "white" };
     let dz_arrow = if is_wrong { "#ef4444" } else if drag_over { "#4f46e5" } else { "#9ca3af" };
+    let viewport_style = format!("{} user-select: none;", super::viewport_style(&bg(), true));
 
-    // Ground truth
-    let files_desc: String = files.iter().enumerate().map(|(i, f)| {
-        let pos = describe_position(f.orig_x, f.orig_y, FILE_W, FILE_H);
-        let marker = if i == target { " (TARGET)" } else { "" };
-        format!("{}.{} at {}{}", f.name, f.ext, pos, marker)
-    }).collect::<Vec<_>>().join(", ");
-    let dz_pos = describe_position(drop_x, drop_y, drop_w, drop_h);
-    let description = format!(
-        "drag & drop, {} files: [{}], drop zone at {}, drag \"{}\" to upload",
-        file_count, files_desc, dz_pos, target_name
+    // Ground truth via UINode tree
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let tree = ui_node::card(
+        Rect::new(0.0, 0.0, vp_w, vp_h),
+        vec![
+            ui_node::drag_source(&target_name, Rect::new(files[target].orig_x, files[target].orig_y, FILE_W, FILE_H)),
+            ui_node::drop_zone("Upload Zone", Rect::new(drop_x, drop_y, drop_w, drop_h)),
+        ],
     );
-
     rsx! {
         div {
             style: "min-height: 100vh; background: #0f0f1a; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: system-ui, sans-serif;",
@@ -203,7 +200,7 @@ pub fn Level15() -> Element {
             // Canvas
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s; user-select: none;",
+                style: "{viewport_style}",
 
                 // Instruction banner
                 div {
@@ -308,8 +305,9 @@ pub fn Level15() -> Element {
                             if let Some(fi) = drag_idx() {
                                 let coords = e.element_coordinates();
                                 let (ox, oy) = drag_off();
-                                let nx = (coords.x as f32 - ox).clamp(0.0, 1024.0 - FILE_W);
-                                let ny = (coords.y as f32 - oy).clamp(0.0, 1024.0 - FILE_H);
+                                let (vp_w, vp_h) = crate::primitives::viewport_size();
+                                let nx = (coords.x as f32 - ox).clamp(0.0, vp_w - FILE_W);
+                                let ny = (coords.y as f32 - oy).clamp(0.0, vp_h - FILE_H);
                                 let mut p = file_pos.write();
                                 if let Some(pos) = p.get_mut(fi) {
                                     *pos = (nx, ny);
@@ -356,12 +354,12 @@ pub fn Level15() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: drop_x,
                 target_y: drop_y,
                 target_w: drop_w,
                 target_h: drop_h,
-                steps: format!(r#"[{{"action":"drag","from":"{}","to":"Upload Zone"}}]"#, target_name),
+                tree: Some(tree.clone()),
             }
         }
     }

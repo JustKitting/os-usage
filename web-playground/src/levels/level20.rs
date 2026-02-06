@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, UINode, Visual, Rect};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const TAB_LABELS: &[&str] = &[
     "General", "Settings", "Profile", "Account", "Security",
@@ -84,8 +84,7 @@ fn random_level20() -> Level20State {
     let card_w = rng.random_range(350.0..=500.0f32);
     let card_h = rng.random_range(280.0..=400.0f32);
     let margin = 50.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (x, y) = super::safe_position(&mut rng, card_w, card_h, margin);
 
     Level20State { tabs, target_tab, initial_tab, mode, style, accent, x, y, card_w, card_h }
 }
@@ -133,20 +132,20 @@ pub fn Level20() -> Element {
     );
     let submit_bg = if is_wrong { "#ef4444" } else { "#4f46e5" };
 
-    // Ground truth
-    let tabs_desc: String = tabs.iter().enumerate().map(|(i, t)| {
-        let active_mark = if i == cur_active { " [ACTIVE]" } else { "" };
-        let target_mark = if i == target_tab { " (TARGET)" } else { "" };
-        format!("\"{}\"{}{}",  t.label, active_mark, target_mark)
-    }).collect::<Vec<_>>().join(", ");
-    let position_desc = describe_position(card_x, card_y, card_w, card_h);
-    let description = format!(
-        "tabs, {} tabs: [{}], style: {}, mode: {}, at {}",
-        tab_count, tabs_desc,
-        match style { 0 => "underline", 1 => "pill", _ => "boxed" },
-        match mode { 1 => "ordinal", _ => "by label" },
-        position_desc
-    );
+    // Ground truth — build UINode tree
+    let card_rect = Rect::new(card_x, card_y, card_w, card_h);
+    let children: Vec<UINode> = tabs.iter().enumerate().map(|(i, t)| {
+        let tab_rect = Rect::new(card_x, card_y, card_w, card_h);
+        if i == target_tab {
+            ui_node::tab(&t.label, tab_rect)
+        } else {
+            // Non-target tab
+            UINode::Tab(Visual::new(&t.label, tab_rect))
+        }
+    }).collect();
+    let tree = ui_node::form(card_rect, "Submit", children);
+    let description = String::new();
+    let viewport_style = super::viewport_style(&bg(), false);
 
     rsx! {
         div {
@@ -175,7 +174,7 @@ pub fn Level20() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -303,7 +302,7 @@ pub fn Level20() -> Element {
                 target_y: card_y,
                 target_w: card_w,
                 target_h: card_h,
-                steps: format!(r#"[{{"action":"click","target":"{}"}}]"#, target_label),
+                tree: Some(tree.clone()),
             }
         }
     }

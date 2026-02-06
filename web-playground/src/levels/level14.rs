@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use rand::Rng;
 
 use crate::Route;
-use crate::primitives::Position;
-use super::{fresh_rng, random_canvas_bg, ordinal, describe_position};
+use crate::ui_node::{self, Rect, UINode, Visual, CheckState};
+use super::{fresh_rng, random_canvas_bg, ordinal};
 
 const LEGAL_PARAGRAPHS: &[&str] = &[
     "By accessing or using this service, you acknowledge that you have read, understood, and agree to be bound by these terms and conditions. These terms constitute a legally binding agreement between you and the service provider. Any modifications to these terms will be effective upon posting.",
@@ -131,8 +131,8 @@ fn random_level14() -> Level14State {
     let card_w = rng.random_range(380.0..=500.0f32);
     let card_h = rng.random_range(450.0..=600.0f32);
     let margin = 40.0;
-    let x = rng.random_range(margin..(Position::VIEWPORT - card_w - margin).max(margin + 1.0));
-    let y = rng.random_range(margin..(Position::VIEWPORT - card_h - margin).max(margin + 1.0));
+    let (vp_w, vp_h) = crate::primitives::viewport_size();
+    let (x, y) = super::safe_position_in(&mut rng, card_w, card_h, margin, vp_w * 1.3, vp_h * 1.3);
 
     Level14State { title, sections, checkbox_count: cb_count, target_checkboxes, mode, target_label, x, y, card_w, card_h }
 }
@@ -149,7 +149,7 @@ pub fn Level14() -> Element {
     let st = state.read();
     let title = st.title.clone();
     let sections: Vec<(String, Option<String>)> = st.sections.clone();
-    let checkbox_count = st.checkbox_count;
+    let _checkbox_count = st.checkbox_count;
     let target_checkboxes: Vec<usize> = st.target_checkboxes.clone();
     let mode = st.mode;
     let target_label = st.target_label.clone();
@@ -160,6 +160,7 @@ pub fn Level14() -> Element {
     drop(st);
 
     let is_wrong = wrong();
+    let viewport_style = super::viewport_style(&bg(), true);
     let checks_snap: Vec<bool> = checks.read().clone();
     let section_count = sections.len();
 
@@ -189,33 +190,32 @@ pub fn Level14() -> Element {
     );
     let submit_bg = if is_wrong { "#ef4444" } else { "#4f46e5" };
 
-    // Ground truth
-    let cb_descs: Vec<String> = {
-        let mut idx = 0;
-        let mut descs = Vec::new();
-        for (si, (_, cb)) in sections.iter().enumerate() {
+    // Build UINode tree for ground truth
+    let checkbox_nodes: Vec<UINode> = {
+        let mut idx = 0usize;
+        let mut nodes = Vec::new();
+        for (_, cb) in sections.iter() {
             if let Some(label) = cb {
                 let is_target = target_checkboxes.contains(&idx);
-                let marker = if is_target { " (TARGET)" } else { "" };
-                descs.push(format!("#{} after para {}: \"{}\"{}", idx + 1, si + 1, label, marker));
+                let cb_rect = Rect::new(card_x + 16.0, card_y + 60.0 + idx as f32 * 50.0, card_w - 32.0, 40.0);
+                if is_target {
+                    nodes.push(ui_node::checkbox(label.as_str(), cb_rect, false));
+                } else {
+                    nodes.push(UINode::Checkbox(
+                        Visual::new(label.as_str(), cb_rect),
+                        CheckState { is_checked: false },
+                    ));
+                }
                 idx += 1;
             }
         }
-        descs
+        nodes
     };
-    let position_desc = describe_position(card_x, card_y, card_w + 32.0, card_h);
-    let description = format!(
-        "\"{}\", {} paragraphs, {} checkboxes: [{}], mode: {}, at {}",
-        title, section_count, checkbox_count,
-        cb_descs.join(", "),
-        match mode {
-            0 => "check all".to_string(),
-            1 => format!("ordinal ({})", ordinal(target_checkboxes[0] + 1)),
-            _ => format!("by label \"{}\"", target_label),
-        },
-        position_desc
+    let tree = ui_node::form(
+        Rect::new(card_x, card_y, card_w + 32.0, card_h),
+        "Accept",
+        checkbox_nodes,
     );
-
     rsx! {
         div {
             style: "min-height: 100vh; background: #0f0f1a; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: system-ui, sans-serif;",
@@ -243,7 +243,7 @@ pub fn Level14() -> Element {
 
             div {
                 id: "viewport",
-                style: "width: 1024px; height: 1024px; background: {bg}; position: relative; border: 1px solid #2a2a4a; overflow: hidden; transition: background 0.4s;",
+                style: "{viewport_style}",
 
                 div {
                     style: "{card_style}",
@@ -337,19 +337,12 @@ pub fn Level14() -> Element {
             }
 
             super::GroundTruth {
-                description: description,
+                description: String::new(),
                 target_x: card_x,
                 target_y: card_y,
                 target_w: card_w + 32.0,
                 target_h: card_h,
-                steps: {
-                    let mut parts: Vec<String> = target_checkboxes.iter()
-                        .filter_map(|&ci| sections.iter().filter_map(|(_, opt)| opt.as_ref()).nth(ci))
-                        .map(|label| format!(r#"{{"action":"click","target":"{}"}}"#, label))
-                        .collect();
-                    parts.push(r#"{"action":"click","target":"Accept"}"#.to_string());
-                    format!("[{}]", parts.join(","))
-                },
+                tree: Some(tree.clone()),
             }
         }
     }
