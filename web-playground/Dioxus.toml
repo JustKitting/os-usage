@@ -1,0 +1,8 @@
+[application]
+name = "web-playground"
+
+[web.app]
+title = "Web Playground"
+
+[web.watcher]
+watch_path = ["src"]

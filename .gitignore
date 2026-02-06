@@ -1,0 +1,29 @@
+# Python bytecode / virtualenvs
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+.env
+*.egg-info/
+
+# Torch / checkpoint artifacts
+*.pt
+*.bin
+*.safetensors
+
+# Training checkpoints
+vl-checkpoints/
+tmp/vl-checkpoints/
+*/vl-checkpoints/
+
+# Rust & Dioxus build outputs
+target/
+**/target/
+web-playground/dist/
+web-playground/.dioxus/
+
+# Misc tooling caches
+.DS_Store
+.idea/
+.pytest_cache/

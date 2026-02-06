@@ -1,0 +1,12 @@
+[package]
+name = "web-playground"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dioxus = { version = "0.7", features = ["web", "router"] }
+rand = "0.9"
+getrandom = { version = "0.3", features = ["wasm_js"] }
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = ["console", "Window", "Document", "Element", "DomRect", "HtmlCollection"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
