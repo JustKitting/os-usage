@@ -335,6 +335,64 @@ fn App() -> Element {
                 // Re-run after route changes (Dioxus updates DOM async)
                 new MutationObserver(autoFit).observe(document.getElementById('main') || document.body, { childList: true, subtree: true });
             }
+
+            // Debug mode: control ground-truth visibility via localStorage + data attribute
+            if (!window.__debugModeInstalled) {
+                window.__debugModeInstalled = true;
+                const key = 'playgroundDebug';
+                const style = document.createElement('style');
+                style.textContent = '#ground-truth{display:none;} body[data-debug="true"] #ground-truth{display:block;}';
+                document.head.appendChild(style);
+
+                window.__setDebugMode = (enabled) => {
+                    const isEnabled = !!enabled;
+                    document.body.dataset.debug = isEnabled ? 'true' : 'false';
+                    window.__debugMode = isEnabled;
+                    try { localStorage.setItem(key, isEnabled ? '1' : '0'); } catch {}
+                };
+
+                const params = new URLSearchParams(window.location.search);
+                const urlFlag = params.get('debug');
+                let enabled = false;
+                try { enabled = localStorage.getItem(key) === '1'; } catch {}
+                if (urlFlag === '1') enabled = true;
+                if (urlFlag === '0') enabled = false;
+                window.__setDebugMode(enabled);
+            }
+
+            // Deterministic seed control: localStorage + URL param (?seed=123 | ?seed=random)
+            if (!window.__seedInstalled) {
+                window.__seedInstalled = true;
+                const key = 'playgroundSeed';
+                const toSeed = (value) => {
+                    const num = Number(value);
+                    if (!Number.isFinite(num) || num < 0) return null;
+                    return Math.floor(num);
+                };
+                const params = new URLSearchParams(window.location.search);
+                const seedParam = params.get('seed');
+                let seedValue = null;
+                if (seedParam === 'random') {
+                    seedValue = Math.floor(Math.random() * 1_000_000_000);
+                } else if (seedParam) {
+                    seedValue = toSeed(seedParam);
+                }
+                if (seedValue === null) {
+                    try { seedValue = toSeed(localStorage.getItem(key)); } catch {}
+                }
+                if (seedValue === null) {
+                    seedValue = Math.floor(Math.random() * 1_000_000_000);
+                }
+                window.__setSeed = (next) => {
+                    const parsed = toSeed(next);
+                    if (parsed === null) return null;
+                    window.__playgroundSeed = parsed;
+                    document.body.dataset.seed = String(parsed);
+                    try { localStorage.setItem(key, String(parsed)); } catch {}
+                    return parsed;
+                };
+                window.__setSeed(seedValue);
+            }
         "#);
     });
 

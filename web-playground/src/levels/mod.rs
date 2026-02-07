@@ -61,6 +61,9 @@ pub use level27::Level27;
 use rand::SeedableRng;
 use rand::Rng;
 use rand::rngs::SmallRng;
+use std::cell::{Cell, RefCell};
+use js_sys::Reflect;
+use wasm_bindgen::JsValue;
 
 use crate::pool::{ElementPool, ElementKind};
 use crate::primitives::Position;
@@ -80,9 +83,62 @@ pub fn random_canvas_bg() -> String {
 }
 
 pub fn fresh_rng() -> SmallRng {
-    let mut buf = [0u8; 32];
-    getrandom::fill(&mut buf).expect("getrandom");
-    SmallRng::from_seed(buf)
+    if let Some(seed) = current_seed() {
+        let counter = SEED_COUNTER.with(|c| {
+            let value = c.get();
+            c.set(value + 1);
+            value
+        });
+        SmallRng::from_seed(expand_seed(seed, counter))
+    } else {
+        let mut buf = [0u8; 32];
+        getrandom::fill(&mut buf).expect("getrandom");
+        SmallRng::from_seed(buf)
+    }
+}
+
+thread_local! {
+    static SEED: RefCell<Option<u64>> = RefCell::new(None);
+    static SEED_COUNTER: Cell<u64> = Cell::new(0);
+}
+
+fn current_seed() -> Option<u64> {
+    SEED.with(|seed| {
+        if seed.borrow().is_none() {
+            let next = seed_from_window();
+            *seed.borrow_mut() = next;
+        }
+        *seed.borrow()
+    })
+}
+
+fn seed_from_window() -> Option<u64> {
+    let window = web_sys::window()?;
+    let value = Reflect::get(&window, &JsValue::from_str("__playgroundSeed")).ok()?;
+    let number = value.as_f64()?;
+    if number.is_finite() && number >= 0.0 {
+        Some(number as u64)
+    } else {
+        None
+    }
+}
+
+fn expand_seed(seed: u64, counter: u64) -> [u8; 32] {
+    let mut state = seed ^ counter.wrapping_mul(0x9e3779b97f4a7c15);
+    let mut out = [0u8; 32];
+    for chunk in out.chunks_exact_mut(8) {
+        let value = splitmix64(&mut state).to_le_bytes();
+        chunk.copy_from_slice(&value);
+    }
+    out
+}
+
+fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e3779b97f4a7c15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^ (z >> 31)
 }
 
 pub fn random_element(pool: &ElementPool, kind: ElementKind) -> PlacedElement {
