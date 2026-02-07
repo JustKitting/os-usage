@@ -10,10 +10,6 @@ pub fn Landing() -> Element {
                 const key = 'playgroundDebug';
                 const toggle = document.getElementById('debug-toggle');
                 const label = document.getElementById('debug-toggle-label');
-                const seedInput = document.getElementById('seed-input');
-                const seedApply = document.getElementById('seed-apply');
-                const seedRandom = document.getElementById('seed-random');
-                const seedCurrent = document.getElementById('seed-current');
 
                 const apply = (enabled) => {
                     if (toggle) {
@@ -39,44 +35,6 @@ pub fn Landing() -> Element {
                         enabled = !enabled;
                         try { localStorage.setItem(key, enabled ? '1' : '0'); } catch {}
                         apply(enabled);
-                    });
-                }
-
-                const seedKey = 'playgroundSeed';
-                const toSeed = (value) => {
-                    const num = Number(value);
-                    if (!Number.isFinite(num) || num < 0) return null;
-                    return Math.floor(num);
-                };
-                const applySeed = (value) => {
-                    const parsed = toSeed(value);
-                    if (parsed === null) return null;
-                    if (window.__setSeed) {
-                        const next = window.__setSeed(parsed);
-                        if (seedInput) seedInput.value = String(next);
-                        if (seedCurrent) seedCurrent.textContent = `Current seed: ${next}`;
-                        return next;
-                    }
-                    return null;
-                };
-                let seedValue = toSeed(window.__playgroundSeed);
-                if (seedValue === null) {
-                    try { seedValue = toSeed(localStorage.getItem(seedKey)); } catch {}
-                }
-                if (seedValue === null) seedValue = 0;
-                if (seedInput) seedInput.value = String(seedValue);
-                if (seedCurrent) seedCurrent.textContent = `Current seed: ${seedValue}`;
-
-                if (seedApply) {
-                    seedApply.addEventListener('click', () => {
-                        applySeed(seedInput ? seedInput.value : seedValue);
-                    });
-                }
-                if (seedRandom) {
-                    seedRandom.addEventListener('click', () => {
-                        const next = Math.floor(Math.random() * 1_000_000_000);
-                        try { localStorage.setItem(seedKey, String(next)); } catch {}
-                        applySeed(next);
                     });
                 }
             }
@@ -177,43 +135,6 @@ pub fn Landing() -> Element {
                 p {
                     style: "color: #6b7280; font-size: 12px; margin: 10px 0 0 0;",
                     "Use this in a debug browser to surface ground-truth data. Eval mode keeps training targets hidden."
-                }
-            }
-
-            // Seed controls
-            div {
-                style: "margin-top: 20px; background: #111827; border: 1px solid #2a2a4a; border-radius: 12px; padding: 20px 24px; max-width: 720px; width: 100%; text-align: center;",
-                h3 {
-                    style: "color: #e5e7eb; font-size: 16px; margin: 0 0 8px 0;",
-                    "Deterministic Seed"
-                }
-                p {
-                    style: "color: #9ca3af; font-size: 14px; margin: 0 0 12px 0;",
-                    "Set a seed to make randomized layouts repeatable across sessions."
-                }
-                div {
-                    style: "display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;",
-                    input {
-                        id: "seed-input",
-                        r#type: "number",
-                        min: "0",
-                        style: "padding: 8px 12px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 14px; width: 180px;",
-                    }
-                    button {
-                        id: "seed-apply",
-                        style: "padding: 8px 14px; border: 1px solid #334155; border-radius: 8px; background: #1f2937; color: #e2e8f0; font-size: 14px; font-weight: 600; cursor: pointer;",
-                        "Apply"
-                    }
-                    button {
-                        id: "seed-random",
-                        style: "padding: 8px 14px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 14px; font-weight: 600; cursor: pointer;",
-                        "Randomize"
-                    }
-                }
-                p {
-                    id: "seed-current",
-                    style: "color: #6b7280; font-size: 12px; margin: 10px 0 0 0;",
-                    "Current seed: 0"
                 }
             }
 
