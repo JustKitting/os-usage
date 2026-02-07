@@ -335,6 +335,30 @@ fn App() -> Element {
                 // Re-run after route changes (Dioxus updates DOM async)
                 new MutationObserver(autoFit).observe(document.getElementById('main') || document.body, { childList: true, subtree: true });
             }
+
+            // Debug mode: control ground-truth visibility via localStorage + data attribute
+            if (!window.__debugModeInstalled) {
+                window.__debugModeInstalled = true;
+                const key = 'playgroundDebug';
+                const style = document.createElement('style');
+                style.textContent = '#ground-truth{display:none;} body[data-debug="true"] #ground-truth{display:block;}';
+                document.head.appendChild(style);
+
+                window.__setDebugMode = (enabled) => {
+                    const isEnabled = !!enabled;
+                    document.body.dataset.debug = isEnabled ? 'true' : 'false';
+                    window.__debugMode = isEnabled;
+                    try { localStorage.setItem(key, isEnabled ? '1' : '0'); } catch {}
+                };
+
+                const params = new URLSearchParams(window.location.search);
+                const urlFlag = params.get('debug');
+                let enabled = false;
+                try { enabled = localStorage.getItem(key) === '1'; } catch {}
+                if (urlFlag === '1') enabled = true;
+                if (urlFlag === '0') enabled = false;
+                window.__setDebugMode(enabled);
+            }
         "#);
     });
 
