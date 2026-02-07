@@ -10,3 +10,4 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = ["console", "Window", "Document", "Element", "DomRect", "HtmlCollection"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
